@@ -1,0 +1,8 @@
+interface:
+  display_name: "项目规划助手"
+  short_description: "把创意规划成架构、流程和实施文档。"
+  default_prompt: "使用 $project-planner 将我的项目创意规划成技术架构、实施路线和项目文档。"
+
+policy:
+  allow_implicit_invocation: true
+
