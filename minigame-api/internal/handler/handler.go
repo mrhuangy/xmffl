@@ -51,7 +51,7 @@ func (h *Handler) Login(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"token":    token,
 		"player":   player,
-		"progress": progress,
+		"progress": domain.NewClientProgress(progress),
 	})
 }
 
@@ -73,13 +73,36 @@ func (h *Handler) AdConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, cfg)
 }
 
+func (h *Handler) InitConfig(c *gin.Context) {
+	controls, err := h.repo.PublicSystemControls(c.Request.Context())
+	if err != nil {
+		serverError(c, err)
+		return
+	}
+	levels, err := h.repo.ListLevels(c.Request.Context())
+	if err != nil {
+		serverError(c, err)
+		return
+	}
+	ads, err := h.repo.AdConfig(c.Request.Context())
+	if err != nil {
+		serverError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"systemControls": controls,
+		"levels":         levels,
+		"ads":            ads,
+	})
+}
+
 func (h *Handler) Progress(c *gin.Context) {
 	progress, err := h.repo.Progress(c.Request.Context(), currentPlayer(c).ID)
 	if err != nil {
 		serverError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, progress)
+	c.JSON(http.StatusOK, domain.NewClientProgress(progress))
 }
 
 func (h *Handler) StartLevel(c *gin.Context) {
@@ -95,7 +118,7 @@ func (h *Handler) StartLevel(c *gin.Context) {
 		handleKnownError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"progress": progress})
+	c.JSON(http.StatusOK, gin.H{"progress": domain.NewClientProgress(progress)})
 }
 
 func (h *Handler) SubmitLevelResult(c *gin.Context) {
@@ -109,7 +132,34 @@ func (h *Handler) SubmitLevelResult(c *gin.Context) {
 		handleKnownError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"progress": progress})
+	c.JSON(http.StatusCreated, gin.H{"progress": domain.NewClientProgress(progress)})
+}
+
+func (h *Handler) ChangeToolCount(c *gin.Context) {
+	var req struct {
+		ToolType string `json:"toolType" binding:"required"`
+		Delta    int    `json:"delta" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		badRequest(c, err.Error())
+		return
+	}
+	if req.Delta == 0 {
+		badRequest(c, "delta must not be zero")
+		return
+	}
+
+	source := "ad_reward"
+	if req.Delta < 0 {
+		source = "use"
+	}
+
+	progress, err := h.repo.ChangeToolCount(c.Request.Context(), currentPlayer(c).ID, req.ToolType, req.Delta, source)
+	if err != nil {
+		handleKnownError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"progress": domain.NewClientProgress(progress)})
 }
 
 func (h *Handler) ShopProducts(c *gin.Context) {
@@ -134,7 +184,7 @@ func (h *Handler) Purchase(c *gin.Context) {
 		handleKnownError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"orderNo": orderNo, "progress": progress})
+	c.JSON(http.StatusCreated, gin.H{"orderNo": orderNo, "progress": domain.NewClientProgress(progress)})
 }
 
 func (h *Handler) Leaderboard(c *gin.Context) {
@@ -193,6 +243,8 @@ func handleKnownError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, gin.H{"error": "insufficient coins"})
 	case errors.Is(err, repository.ErrInsufficientStamina):
 		c.JSON(http.StatusConflict, gin.H{"error": "insufficient stamina"})
+	case errors.Is(err, repository.ErrInsufficientTool):
+		c.JSON(http.StatusConflict, gin.H{"error": "insufficient tool charges"})
 	case errors.Is(err, repository.ErrProductUnavailable):
 		c.JSON(http.StatusNotFound, gin.H{"error": "product unavailable"})
 	default:

@@ -39,7 +39,7 @@ func main() {
 	repo := store.NewMySQLStore(db)
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewRouter(repo, cfg.AllowOrigin),
+		Handler:           httpapi.NewRouter(repo, cfg.AllowOrigin, cfg.JWTSecret),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

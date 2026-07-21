@@ -21,6 +21,7 @@ func New(cfg config.Config, repo repository.Repository, h *handler.Handler) http
 
 	v1 := r.Group("/api/v1")
 	v1.POST("/auth/login", h.Login)
+	v1.GET("/config/init", h.InitConfig)
 	v1.GET("/config/levels", h.Levels)
 	v1.GET("/config/ads", h.AdConfig)
 	v1.GET("/leaderboard", h.Leaderboard)
@@ -30,6 +31,7 @@ func New(cfg config.Config, repo repository.Repository, h *handler.Handler) http
 	authed.GET("/player/progress", h.Progress)
 	authed.POST("/levels/start", h.StartLevel)
 	authed.POST("/levels/results", h.SubmitLevelResult)
+	authed.POST("/tools/change", h.ChangeToolCount)
 	authed.GET("/shop/products", h.ShopProducts)
 	authed.POST("/shop/purchase", h.Purchase)
 	authed.POST("/events/batch", h.Events)

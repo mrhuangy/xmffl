@@ -42,6 +42,15 @@ CREATE TABLE IF NOT EXISTS level_configs (
   flip_back_delay_ms INT UNSIGNED NOT NULL DEFAULT 700,
   level_time_limit_seconds INT UNSIGNED NOT NULL DEFAULT 120,
   max_mismatch_count INT UNSIGNED NOT NULL DEFAULT 12,
+  show_steps TINYINT(1) NOT NULL DEFAULT 1,
+  show_timer TINYINT(1) NOT NULL DEFAULT 1,
+  show_mismatch TINYINT(1) NOT NULL DEFAULT 1,
+  hint_highlight_ms INT UNSIGNED NOT NULL DEFAULT 1300,
+  coin_reward_base INT UNSIGNED NOT NULL DEFAULT 10,
+  coin_reward_star1 INT UNSIGNED NOT NULL DEFAULT 10,
+  coin_reward_star2 INT UNSIGNED NOT NULL DEFAULT 20,
+  coin_reward_star3 INT UNSIGNED NOT NULL DEFAULT 30,
+  stamina_cost INT UNSIGNED NOT NULL DEFAULT 1,
   excellent_step_threshold INT UNSIGNED NOT NULL,
   normal_step_threshold INT UNSIGNED NOT NULL,
   excellent_time_threshold INT UNSIGNED NULL,
@@ -55,7 +64,13 @@ CREATE TABLE IF NOT EXISTS level_configs (
   UNIQUE KEY uk_level_configs_level_id (level_id),
   KEY idx_level_configs_enabled (enabled, level_id),
   KEY idx_level_configs_theme_id (theme_id),
-  CONSTRAINT chk_level_configs_grid CHECK (rows_count * cols_count = pair_count * 2)
+  CONSTRAINT chk_level_configs_grid CHECK (
+    rows_count * cols_count = pair_count * 2
+    OR (
+      rows_count * cols_count = pair_count * 2 + 1
+      AND MOD(rows_count * cols_count, 2) = 1
+    )
+  )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS ad_frequency_configs (
@@ -67,6 +82,34 @@ CREATE TABLE IF NOT EXISTS ad_frequency_configs (
   banner_enabled_scenes JSON NOT NULL,
   version INT UNSIGNED NOT NULL DEFAULT 1,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS system_controls (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  control_key VARCHAR(128) NOT NULL,
+  control_group VARCHAR(64) NOT NULL DEFAULT 'general',
+  name VARCHAR(128) NOT NULL DEFAULT '',
+  description VARCHAR(512) NOT NULL DEFAULT '',
+  value_type ENUM('bool', 'int', 'decimal', 'string', 'json') NOT NULL DEFAULT 'string',
+  value_text TEXT NULL,
+  value_json JSON NULL,
+  default_value_text TEXT NULL,
+  default_value_json JSON NULL,
+  enabled TINYINT(1) NOT NULL DEFAULT 1,
+  is_public TINYINT(1) NOT NULL DEFAULT 0,
+  sort_order INT NOT NULL DEFAULT 0,
+  version INT UNSIGNED NOT NULL DEFAULT 1,
+  effective_from DATETIME NULL,
+  effective_until DATETIME NULL,
+  created_by BIGINT UNSIGNED NULL,
+  updated_by BIGINT UNSIGNED NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_system_controls_key (control_key),
+  KEY idx_system_controls_group_enabled (control_group, enabled, sort_order),
+  KEY idx_system_controls_public_enabled (is_public, enabled, sort_order),
+  KEY idx_system_controls_effective (effective_from, effective_until),
+  KEY idx_system_controls_updated_at (updated_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS ad_placements (
@@ -90,7 +133,9 @@ CREATE TABLE IF NOT EXISTS player_progress (
   coins INT NOT NULL DEFAULT 0,
   stamina INT NOT NULL DEFAULT 5,
   max_stamina INT UNSIGNED NOT NULL DEFAULT 5,
-  hints INT NOT NULL DEFAULT 0,
+  hints INT NOT NULL DEFAULT 3,
+  preview_again_count INT NOT NULL DEFAULT 3,
+  remove_pair_count INT NOT NULL DEFAULT 3,
   level_stars JSON NOT NULL,
   completed_levels JSON NOT NULL,
   next_stamina_recover_at DATETIME NULL,
@@ -206,6 +251,24 @@ CREATE TABLE IF NOT EXISTS stamina_transactions (
   CONSTRAINT fk_stamina_transactions_player FOREIGN KEY (player_id) REFERENCES players(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS tool_transactions (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  transaction_no VARCHAR(128) NOT NULL,
+  player_id BIGINT UNSIGNED NOT NULL,
+  tool_type ENUM('hint', 'preview_again', 'remove_pair') NOT NULL,
+  change_amount INT NOT NULL,
+  balance_after INT NOT NULL,
+  source ENUM('register', 'use', 'ad_reward', 'admin_adjust') NOT NULL,
+  ref_type VARCHAR(64) NOT NULL DEFAULT '',
+  ref_id VARCHAR(128) NOT NULL DEFAULT '',
+  note VARCHAR(255) NOT NULL DEFAULT '',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_tool_transactions_no (transaction_no),
+  KEY idx_tool_transactions_player_time (player_id, created_at),
+  KEY idx_tool_transactions_tool_source (tool_type, source, created_at),
+  CONSTRAINT fk_tool_transactions_player FOREIGN KEY (player_id) REFERENCES players(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS shop_products (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   product_key VARCHAR(64) NOT NULL,
@@ -282,15 +345,25 @@ CREATE TABLE IF NOT EXISTS game_events (
 CREATE TABLE IF NOT EXISTS admin_users (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   username VARCHAR(64) NOT NULL,
+  email VARCHAR(255) NULL,
   password_hash VARCHAR(255) NOT NULL,
   display_name VARCHAR(64) NOT NULL DEFAULT '',
   role ENUM('owner', 'operator', 'viewer') NOT NULL DEFAULT 'operator',
-  status ENUM('active', 'disabled') NOT NULL DEFAULT 'active',
+  permissions JSON NULL,
+  status ENUM('active', 'disabled', 'locked') NOT NULL DEFAULT 'active',
+  failed_login_attempts INT UNSIGNED NOT NULL DEFAULT 0,
+  locked_until DATETIME NULL,
+  password_changed_at DATETIME NULL,
   last_login_at DATETIME NULL,
+  last_login_ip VARCHAR(45) NOT NULL DEFAULT '',
+  created_by BIGINT UNSIGNED NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uk_admin_users_username (username),
-  KEY idx_admin_users_status_role (status, role)
+  UNIQUE KEY uk_admin_users_email (email),
+  KEY idx_admin_users_status_role (status, role),
+  KEY idx_admin_users_locked_until (locked_until),
+  CONSTRAINT fk_admin_users_created_by FOREIGN KEY (created_by) REFERENCES admin_users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT INTO theme_configs (theme_id, name, asset_base_path, icon_keys)
@@ -311,6 +384,28 @@ INSERT INTO ad_frequency_configs (
   banner_enabled_scenes
 ) VALUES (1, 4, 4, 10, 1, JSON_ARRAY('home', 'result'))
 ON DUPLICATE KEY UPDATE id = id;
+
+INSERT INTO system_controls (
+  control_key,
+  control_group,
+  name,
+  description,
+  value_type,
+  value_text,
+  value_json,
+  default_value_text,
+  default_value_json,
+  enabled,
+  is_public,
+  sort_order
+) VALUES
+  ('system.maintenance_mode', 'system', '维护模式', '开启后可用于后台或接口统一拦截非管理流量', 'bool', 'false', NULL, 'false', NULL, 1, 1, 10),
+  ('client.min_version', 'client', '最低客户端版本', '低于该版本时可提示升级', 'string', '1.0.0', NULL, '1.0.0', NULL, 1, 1, 20),
+  ('client.force_update', 'client', '强制更新', '开启后客户端可根据版本策略强制升级', 'bool', 'false', NULL, 'false', NULL, 1, 1, 30),
+  ('game.unlimited_stamina', 'game', '无限体力', '开启后隐藏客户端体力栏，并且开始关卡不消耗体力', 'bool', 'false', NULL, 'false', NULL, 1, 1, 35),
+  ('game.feature_flags', 'game', '玩法功能开关', '全局玩法功能开关集合', 'json', NULL, JSON_OBJECT('timeMode', false, 'leaderboard', true, 'shop', true), NULL, JSON_OBJECT('timeMode', false, 'leaderboard', true, 'shop', true), 1, 1, 40),
+  ('notice.home_banner', 'notice', '首页公告', '小游戏首页公告或运营提示', 'json', NULL, JSON_OBJECT('enabled', false, 'title', '', 'content', ''), NULL, JSON_OBJECT('enabled', false, 'title', '', 'content', ''), 1, 1, 50)
+ON DUPLICATE KEY UPDATE control_key = control_key;
 
 INSERT INTO ad_placements (placement_key, ad_type, scene, reward_type, reward_amount)
 VALUES
@@ -333,16 +428,8 @@ INSERT INTO shop_products (
   daily_buy_limit,
   enabled,
   sort_order
-) VALUES (
-  'stamina_5_by_coins',
-  '金币兑换 5 点体力',
-  'stamina',
-  'coins',
-  100,
-  'stamina',
-  5,
-  10,
-  1,
-  10
-)
+) VALUES
+  ('stamina_1_by_coins', '金币兑换 1 点体力', 'stamina', 'coins', 99, 'stamina', 1, 10, 1, 10),
+  ('stamina_3_by_coins', '金币兑换 3 点体力', 'stamina', 'coins', 266, 'stamina', 3, 10, 1, 20),
+  ('stamina_5_by_coins', '金币兑换 5 点体力', 'stamina', 'coins', 388, 'stamina', 5, 10, 1, 30)
 ON DUPLICATE KEY UPDATE product_key = product_key;

@@ -49,7 +49,7 @@ erDiagram
 | `ad_events` | 广告请求、展示、完成、关闭、失败、奖励发放事件 |
 | `leaderboard_entries` | 排行榜成绩，按关卡维度排序 |
 | `game_events` | 通用玩法事件日志，用于运营分析 |
-| `admin_users` | 后台管理员账号，后续接入登录鉴权时使用 |
+| `admin_users` | 后台管理员账号，包含角色、细粒度权限、登录锁定和审计字段 |
 
 ## 关键字段说明
 
@@ -67,6 +67,7 @@ erDiagram
 - `max_mismatch_count`：错配上限。
 - `excellent_step_threshold` / `normal_step_threshold`：3 星和 2 星步数阈值。
 - `excellent_time_threshold` / `normal_time_threshold`：时间阈值，可选。
+- `coin_reward_star1` / `coin_reward_star2` / `coin_reward_star3`：1 星、2 星、3 星通关金币奖励。
 
 ### player_progress
 
@@ -115,7 +116,7 @@ erDiagram
 - 自然恢复：`reason = 'auto_recover'`。
 - 活动赠送：`reason = 'activity'`。
 
-`player_progress.next_stamina_recover_at` 用于自然恢复倒计时，具体恢复规则可放在服务端配置或运营配置表。
+`player_progress.next_stamina_recover_at` 用于自然恢复倒计时。当前规则为未满体力时每 2 分钟恢复 1 点，达到 `max_stamina` 后停止计时；自然恢复由服务端结算，并写入 `stamina_transactions`，客户端只展示倒计时。
 
 ### shop_products 与 purchase_orders
 
@@ -149,7 +150,7 @@ erDiagram
 
 ## 扩展建议
 
-- 后台登录上线时，`admin_users.password_hash` 使用 bcrypt/argon2 哈希，不保存明文密码。
+- `admin_users.password_hash` 使用 bcrypt/argon2 哈希，不保存明文密码；连续登录失败次数与锁定截止时间分别记录在 `failed_login_attempts` 和 `locked_until`。
 - 广告位 ID 按环境拆分：测试、体验、正式可放入 `ad_placements.extra_config`。
 - 数据量上来后，`game_events` 和 `ad_events` 建议按月归档或分区。
 - 若接入微信登录态，`players.session_key_hash` 只保存哈希或短期缓存，不长期保存敏感明文。

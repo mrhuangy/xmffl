@@ -21,10 +21,61 @@ type PlayerProgress struct {
 	Stamina              int            `json:"stamina"`
 	MaxStamina           int            `json:"maxStamina"`
 	Hints                int            `json:"hints"`
+	PreviewAgainCount    int            `json:"previewAgainCount"`
+	RemovePairCount      int            `json:"removePairCount"`
 	LevelStars           map[string]int `json:"levelStars"`
 	CompletedLevels      []int          `json:"completedLevels"`
 	NextStaminaRecoverAt *time.Time     `json:"nextStaminaRecoverAt,omitempty"`
 	UpdatedAt            time.Time      `json:"updatedAt"`
+}
+
+type ClientProgress struct {
+	Version              int            `json:"version"`
+	CurrentLevel         int            `json:"currentLevel"`
+	Coins                int            `json:"coins"`
+	Hints                int            `json:"hints"`
+	PreviewAgainCount    int            `json:"previewAgainCount"`
+	RemovePairCount      int            `json:"removePairCount"`
+	Stamina              int            `json:"stamina"`
+	MaxStamina           int            `json:"maxStamina"`
+	NextStaminaRecoverAt *int64         `json:"nextStaminaRecoverAt,omitempty"`
+	LevelStars           map[string]int `json:"levelStars"`
+	CompletedLevels      []int          `json:"completedLevels"`
+	UpdatedAt            int64          `json:"updatedAt"`
+}
+
+func NewClientProgress(progress PlayerProgress) ClientProgress {
+	updatedAt := progress.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = time.Now()
+	}
+	levelStars := progress.LevelStars
+	if levelStars == nil {
+		levelStars = map[string]int{}
+	}
+	completedLevels := progress.CompletedLevels
+	if completedLevels == nil {
+		completedLevels = []int{}
+	}
+	var nextStaminaRecoverAt *int64
+	if progress.NextStaminaRecoverAt != nil {
+		value := progress.NextStaminaRecoverAt.UnixMilli()
+		nextStaminaRecoverAt = &value
+	}
+	return ClientProgress{
+		Version:              1,
+		CurrentLevel:         progress.CurrentLevel,
+		Coins:                progress.Coins,
+		Hints:                progress.Hints,
+		PreviewAgainCount:    progress.PreviewAgainCount,
+		RemovePairCount:      progress.RemovePairCount,
+		Stamina:              progress.Stamina,
+		MaxStamina:           progress.MaxStamina,
+		NextStaminaRecoverAt: nextStaminaRecoverAt,
+		LevelStars:           levelStars,
+		CompletedLevels:      completedLevels,
+		UpdatedAt:            updatedAt.UnixMilli(),
+	}
 }
 
 type LevelConfig struct {
@@ -38,6 +89,15 @@ type LevelConfig struct {
 	FlipBackDelayMs        int       `json:"flipBackDelayMs"`
 	LevelTimeLimitSeconds  int       `json:"levelTimeLimitSeconds"`
 	MaxMismatchCount       int       `json:"maxMismatchCount"`
+	ShowSteps              bool      `json:"showSteps"`
+	ShowTimer              bool      `json:"showTimer"`
+	ShowMismatch           bool      `json:"showMismatch"`
+	HintHighlightMs        int       `json:"hintHighlightMs"`
+	CoinRewardBase         int       `json:"coinRewardBase"`
+	CoinRewardStar1        int       `json:"coinRewardStar1"`
+	CoinRewardStar2        int       `json:"coinRewardStar2"`
+	CoinRewardStar3        int       `json:"coinRewardStar3"`
+	StaminaCost            int       `json:"staminaCost"`
 	ExcellentStepThreshold int       `json:"excellentStepThreshold"`
 	NormalStepThreshold    int       `json:"normalStepThreshold"`
 	ExcellentTimeThreshold *int      `json:"excellentTimeThreshold,omitempty"`
@@ -57,6 +117,8 @@ type AdFrequencyConfig struct {
 	Version                   int      `json:"version"`
 	UpdatedAt                 string   `json:"updatedAt"`
 }
+
+type PublicSystemControls map[string]any
 
 type ShopProduct struct {
 	ID             uint64    `json:"id"`

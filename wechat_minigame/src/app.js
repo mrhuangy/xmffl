@@ -1,12 +1,13 @@
 const { AssetLoader } = require("./assets");
-const { imageAssets, audioAssets, levelConfigs } = require("./config");
+const { ApiClient } = require("./api-client");
+const { AdService } = require("./ad-service");
+const { imageAssets, audioAssets, levelConfigs: defaultLevelConfigs } = require("./config");
 const { MatchGame } = require("./game-logic");
 const { Renderer, clamp } = require("./renderer");
 const { ProgressStore } = require("./storage");
+const { RewardService } = require("./reward-service");
 
-const COIN_REWARD_AD_UNIT_ID = "";
-const STAMINA_REWARD_AD_UNIT_ID = "";
-const TOOL_REWARD_AD_UNIT_ID = "";
+const STAMINA_RECOVER_INTERVAL_MS = 2 * 60 * 1000;
 
 class GameApp {
   constructor() {
@@ -15,8 +16,16 @@ class GameApp {
     this.assets = new AssetLoader(this.canvas);
     this.renderer = new Renderer(this.ctx, this.assets);
     this.progressStore = new ProgressStore();
+    this.apiClient = new ApiClient(this.progressStore);
+    this.rewardService = new RewardService(this.progressStore, this.apiClient);
+    this.adService = new AdService();
+    this.levelConfigs = defaultLevelConfigs;
+    this.systemControls = {};
+    this.unlimitedStamina = false;
+    this.levelConfigPromise = null;
     this.scene = "loading";
-    this.progress = this.progressStore.load();
+    this.progress = this.rewardService.loadProgress();
+    this.player = (this.progressStore.loadAuth() || {}).player || null;
     this.game = null;
     this.cardRects = [];
     this.removedAnimations = [];
@@ -27,28 +36,32 @@ class GameApp {
     this.hintEndAt = 0;
     this.previewAgainIndexes = [];
     this.previewAgainEndAt = 0;
-    this.previewAgainCount = 3;
-    this.removePairCount = 3;
+    this.previewAgainCount = this.progress.previewAgainCount || 3;
+    this.removePairCount = this.progress.removePairCount || 3;
     this.mismatchTimerAt = 0;
     this.previewEndAt = 0;
     this.gamePaused = false;
     this.pauseStartedAt = 0;
     this.toolAdDialog = null;
-    this.toolRewardAd = null;
-    this.pendingToolReward = null;
     this.loadingProgress = 0;
     this.toast = null;
     this.settingsOpen = false;
     this.coinAdDialogOpen = false;
     this.staminaShopOpen = false;
     this.staminaExchangeConfirm = null;
-    this.musicEnabled = true;
-    this.sfxEnabled = true;
-    this.coinRewardAd = null;
-    this.staminaRewardAd = null;
+    this.audioSettings = this.progressStore.loadSettings();
+    this.musicEnabled = this.audioSettings.musicEnabled;
+    this.sfxEnabled = this.audioSettings.sfxEnabled;
     this.width = 0;
     this.height = 0;
     this.dpr = 1;
+    this.sessionReady = false;
+    this.sessionPromise = null;
+    this.startingLevel = false;
+    this.staminaRefreshPromise = null;
+    this.needsStaminaSync = false;
+    this.nextStaminaRefreshRetryAt = 0;
+    this.toolUsePending = false;
   }
 
   start() {
@@ -59,6 +72,8 @@ class GameApp {
     }
 
     this.assets.loadAudio(audioAssets);
+    this.levelConfigPromise = this.syncInitConfig();
+    this.sessionPromise = this.syncSession();
     this.assets.loadImages(imageAssets, (loaded, total) => {
       this.loadingProgress = total > 0 ? loaded / total : 1;
     }).then(() => {
@@ -68,6 +83,189 @@ class GameApp {
     });
 
     this.loop();
+  }
+
+  syncSession() {
+    this.sessionPromise = this.apiClient.login()
+      .then((data) => {
+        if (data && data.player) {
+          this.player = data.player;
+        }
+        if (data && data.progress) {
+          this.progress = this.progressStore.load();
+          this.syncToolCountsFromProgress(this.progress);
+          this.sessionReady = true;
+        }
+        return this.apiClient.fetchProgress();
+      })
+      .then((progress) => {
+        this.progress = progress;
+        this.syncToolCountsFromProgress(progress);
+        this.sessionReady = true;
+      })
+      .catch((error) => {
+        this.sessionReady = false;
+        if (typeof console !== "undefined" && console.warn) {
+          console.warn("sync session failed", error);
+        }
+      });
+    return this.sessionPromise;
+  }
+
+  syncInitConfig() {
+    this.levelConfigPromise = this.apiClient.fetchInitConfig()
+      .then((config) => {
+        if (config && Array.isArray(config.levels) && config.levels.length > 0) {
+          this.levelConfigs = config.levels;
+        }
+        if (config && config.systemControls) {
+          this.applySystemControls(config.systemControls);
+        }
+        return this.levelConfigs;
+      })
+      .catch((error) => {
+        if (typeof console !== "undefined" && console.warn) {
+          console.warn("sync init config failed", error);
+        }
+        return this.syncLevelConfigs();
+      });
+    return this.levelConfigPromise;
+  }
+
+  syncLevelConfigs() {
+    this.levelConfigPromise = this.apiClient.fetchLevels()
+      .then((levels) => {
+        if (levels && levels.length > 0) {
+          this.levelConfigs = levels;
+        }
+        return this.levelConfigs;
+      })
+      .catch((error) => {
+        if (typeof console !== "undefined" && console.warn) {
+          console.warn("sync level configs failed", error);
+        }
+        this.levelConfigPromise = null;
+        return this.levelConfigs;
+      });
+    return this.levelConfigPromise;
+  }
+
+  ensureLevelConfigs() {
+    return this.levelConfigPromise || this.syncInitConfig();
+  }
+
+  applySystemControls(controls) {
+    this.systemControls = controls || {};
+    this.unlimitedStamina = this.systemControls["game.unlimited_stamina"] === true;
+  }
+
+  syncToolCountsFromProgress(progress) {
+    if (!progress) {
+      return;
+    }
+    if (typeof progress.previewAgainCount === "number") {
+      this.previewAgainCount = progress.previewAgainCount;
+    }
+    if (typeof progress.removePairCount === "number") {
+      this.removePairCount = progress.removePairCount;
+    }
+  }
+
+  consumeTool(toolType, label) {
+    if (this.toolUsePending) {
+      return Promise.resolve(false);
+    }
+    this.toolUsePending = true;
+    return this.apiClient.changeToolCount(toolType, -1)
+      .then((progress) => {
+        this.progress = progress;
+        this.syncToolCountsFromProgress(progress);
+        return true;
+      })
+      .catch((error) => {
+        const message = error && error.message ? error.message : "";
+        if (message.includes("insufficient tool charges")) {
+          this.openToolAdDialog(toolType, label);
+        } else {
+          this.showToast("\u6b21\u6570\u540c\u6b65\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5");
+        }
+        if (typeof console !== "undefined" && console.warn) {
+          console.warn("consume tool failed", error);
+        }
+        return false;
+      })
+      .finally(() => {
+        this.toolUsePending = false;
+      });
+  }
+
+  refreshStaminaWhenDue(now) {
+    if (this.unlimitedStamina) {
+      return;
+    }
+    if (!this.progress) {
+      return;
+    }
+
+    const stamina = this.progress.stamina ?? 0;
+    const maxStamina = this.progress.maxStamina ?? 0;
+    const nextRecoverAt = this.progress.nextStaminaRecoverAt || 0;
+    if (stamina < maxStamina && !nextRecoverAt) {
+      this.needsStaminaSync = true;
+    }
+
+    if (this.projectStaminaRecovery(now)) {
+      this.needsStaminaSync = true;
+    }
+
+    if (!this.needsStaminaSync || now < this.nextStaminaRefreshRetryAt || this.staminaRefreshPromise) {
+      return;
+    }
+
+    this.staminaRefreshPromise = this.apiClient.fetchProgress()
+      .then((progress) => {
+        this.progress = progress;
+        this.syncToolCountsFromProgress(progress);
+        this.needsStaminaSync = false;
+        this.nextStaminaRefreshRetryAt = 0;
+      })
+      .catch((error) => {
+        this.nextStaminaRefreshRetryAt = Date.now() + 10000;
+        if (typeof console !== "undefined" && console.warn) {
+          console.warn("refresh stamina failed", error);
+        }
+      })
+      .finally(() => {
+        this.staminaRefreshPromise = null;
+      });
+  }
+
+  projectStaminaRecovery(now) {
+    const stamina = this.progress.stamina ?? 0;
+    const maxStamina = this.progress.maxStamina ?? 0;
+    const nextRecoverAt = this.progress.nextStaminaRecoverAt || 0;
+    if (stamina >= maxStamina || !nextRecoverAt || now < nextRecoverAt) {
+      return false;
+    }
+
+    const recoverCount = Math.min(
+      maxStamina - stamina,
+      1 + Math.floor((now - nextRecoverAt) / STAMINA_RECOVER_INTERVAL_MS)
+    );
+    if (recoverCount <= 0) {
+      return false;
+    }
+
+    const nextProgress = {
+      ...this.progress,
+      stamina: stamina + recoverCount,
+      nextStaminaRecoverAt: stamina + recoverCount >= maxStamina
+        ? null
+        : nextRecoverAt + recoverCount * STAMINA_RECOVER_INTERVAL_MS,
+      updatedAt: now
+    };
+    this.progress = this.progressStore.saveRemote(nextProgress);
+    return true;
   }
 
   resize() {
@@ -92,6 +290,7 @@ class GameApp {
     if (this.toast && now >= this.toast.until) {
       this.toast = null;
     }
+    this.refreshStaminaWhenDue(now);
 
     if (!this.game) {
       return;
@@ -148,6 +347,7 @@ class GameApp {
         height: this.height,
         buttons: this.buttons,
         progress: this.progress,
+        player: this.player,
         toast: this.toast,
         settingsOpen: this.settingsOpen,
         coinAdDialogOpen: this.coinAdDialogOpen,
@@ -156,7 +356,8 @@ class GameApp {
         settings: {
           musicEnabled: this.musicEnabled,
           sfxEnabled: this.sfxEnabled
-        }
+        },
+        unlimitedStamina: this.unlimitedStamina
       });
       return;
     }
@@ -169,11 +370,12 @@ class GameApp {
         buttons: this.buttons,
         levels: this.levelCards,
         currentPage: this.levelPage,
-        pageCount: Math.ceil(levelConfigs.length / 20),
+        pageCount: Math.ceil(this.levelConfigs.length / 20),
         progress: this.progress,
         toast: this.toast,
         staminaShopOpen: this.staminaShopOpen,
-        staminaExchangeConfirm: this.staminaExchangeConfirm
+        staminaExchangeConfirm: this.staminaExchangeConfirm,
+        unlimitedStamina: this.unlimitedStamina
       });
       return;
     }
@@ -227,7 +429,7 @@ class GameApp {
     const hudStatH = Math.max(26, Math.min(30, hudPlayerH * 0.68));
     const staminaW = Math.max(62, Math.min(70, this.width * 0.165));
     const staminaX = 14 + hudPlayerW + Math.max(8, this.width * 0.02);
-    const coinX = staminaX + staminaW + hudGap;
+    const coinX = this.unlimitedStamina ? staminaX : staminaX + staminaW + hudGap;
     const safeRight = this.width - 92;
     const coinW = Math.max(62, Math.min(Math.max(66, Math.min(74, this.width * 0.175)), safeRight - coinX));
     const statY = hudY + Math.max(2, this.height * 0.008);
@@ -303,12 +505,12 @@ class GameApp {
     };
 
     const pageSize = 20;
-    const pageCount = Math.ceil(levelConfigs.length / pageSize);
+    const pageCount = Math.ceil(this.levelConfigs.length / pageSize);
     this.levelPage = Math.max(0, Math.min(this.levelPage, pageCount - 1));
-    const pageLevels = levelConfigs.slice(this.levelPage * pageSize, (this.levelPage + 1) * pageSize);
+    const pageLevels = this.levelConfigs.slice(this.levelPage * pageSize, (this.levelPage + 1) * pageSize);
 
     this.levelCards = pageLevels.map((level, index) => {
-      const progress = this.progressStore.load();
+      const progress = this.progress;
       const row = Math.floor(index / cols);
       const col = index % cols;
       return {
@@ -349,8 +551,9 @@ class GameApp {
       pauseClose: { x: pausePanelX + pausePanelW - pauseCloseSize - 10, y: pausePanelY + 10, w: pauseCloseSize, h: pauseCloseSize },
       toolAdCancel: { x: this.width * 0.24, y: this.height * 0.52, w: this.width * 0.24, h: 38 },
       toolAdConfirm: { x: this.width * 0.52, y: this.height * 0.52, w: this.width * 0.24, h: 38 },
-      retry: { x: this.width * 0.18, y: this.height * 0.28 + 208, w: this.width * 0.28, h: 42 },
-      next: { x: this.width * 0.54, y: this.height * 0.28 + 208, w: this.width * 0.28, h: 42 }
+      retry: { x: this.width * 0.13, y: this.height * 0.28 + 208, w: this.width * 0.22, h: 42 },
+      exit: { x: this.width * 0.39, y: this.height * 0.28 + 208, w: this.width * 0.22, h: 42 },
+      next: { x: this.width * 0.65, y: this.height * 0.28 + 208, w: this.width * 0.22, h: 42 }
     };
 
     const level = this.game.level;
@@ -365,7 +568,7 @@ class GameApp {
     const startX = boardX + (this.width * 0.91 - cardsW) / 2;
     const startY = boardY + (this.height * 0.44 - boardCardsH) / 2;
 
-    const emptySlots = level.emptySlots || [];
+    const emptySlots = this.emptySlotsForLevel(level);
     const boardSlots = Array.from({ length: level.rows * level.cols }, (_, index) => index)
       .filter((index) => !emptySlots.includes(index));
 
@@ -417,6 +620,7 @@ class GameApp {
         this.startLevel(this.progress.currentLevel);
       } else if (hit(this.buttons.levels, x, y)) {
         this.playSfx("click");
+        this.ensureLevelConfigs();
         this.scene = "levels";
       } else if (hit(this.buttons.timeMode, x, y)) {
         this.playSfx("click");
@@ -428,6 +632,9 @@ class GameApp {
         this.playSfx("click");
         this.settingsOpen = true;
       } else if (hit(this.buttons.staminaPlus, x, y)) {
+        if (this.unlimitedStamina) {
+          return;
+        }
         this.playSfx("click");
         this.staminaShopOpen = true;
       } else if (hit(this.buttons.coinPlus, x, y)) {
@@ -462,11 +669,14 @@ class GameApp {
 
       if (hit(this.buttons.levelNext, x, y)) {
         this.playSfx("click");
-        this.levelPage = Math.min(Math.ceil(levelConfigs.length / 20) - 1, this.levelPage + 1);
+        this.levelPage = Math.min(Math.ceil(this.levelConfigs.length / 20) - 1, this.levelPage + 1);
         return;
       }
 
       if (hit(this.buttons.staminaPlus, x, y)) {
+        if (this.unlimitedStamina) {
+          return;
+        }
         this.playSfx("click");
         this.staminaShopOpen = true;
         return;
@@ -561,6 +771,7 @@ class GameApp {
     if (hit(this.buttons.pauseMusic, x, y)) {
       this.playSfx("click");
       this.musicEnabled = !this.musicEnabled;
+      this.saveAudioSettings();
       if (this.musicEnabled) {
         this.playBgm("gameBgm");
       } else {
@@ -572,6 +783,7 @@ class GameApp {
 
     if (hit(this.buttons.pauseSfx, x, y)) {
       this.sfxEnabled = !this.sfxEnabled;
+      this.saveAudioSettings();
       this.playSfx("click");
       return;
     }
@@ -620,61 +832,27 @@ class GameApp {
     }
   }
 
-  addToolCount(type) {
-    if (type === "hint") {
-      this.progress = this.progressStore.addHints(1);
-    } else if (type === "previewAgain") {
-      this.previewAgainCount += 1;
-    } else if (type === "removePair") {
-      this.removePairCount += 1;
-    }
-  }
-
   showToolRewardAd(type) {
-    if (!TOOL_REWARD_AD_UNIT_ID || typeof wx.createRewardedVideoAd !== "function") {
-      this.toast = {
-        text: "\u5e7f\u544a\u6682\u672a\u914d\u7f6e",
-        until: Date.now() + 2000
-      };
-      this.resumeGame();
-      return;
-    }
-
-    this.pendingToolReward = type;
-    if (!this.toolRewardAd) {
-      this.toolRewardAd = wx.createRewardedVideoAd({ adUnitId: TOOL_REWARD_AD_UNIT_ID });
-      this.toolRewardAd.onClose((result) => {
-        if (result && result.isEnded && this.pendingToolReward) {
-          this.addToolCount(this.pendingToolReward);
-          this.toast = {
-            text: "\u6b21\u6570+1",
-            until: Date.now() + 2000
-          };
-        }
-        this.pendingToolReward = null;
-        this.resumeGame();
-      });
-      this.toolRewardAd.onError(() => {
-        this.toast = {
-          text: "\u5e7f\u544a\u6682\u65f6\u65e0\u6cd5\u64ad\u653e",
-          until: Date.now() + 2000
-        };
-        this.pendingToolReward = null;
-        this.resumeGame();
-      });
-    }
-
-    this.toolRewardAd.show().catch(() => {
-      this.toolRewardAd.load()
-        .then(() => this.toolRewardAd.show())
-        .catch(() => {
-          this.toast = {
-            text: "\u5e7f\u544a\u6682\u65f6\u65e0\u6cd5\u64ad\u653e",
-            until: Date.now() + 2000
-          };
-          this.pendingToolReward = null;
-          this.resumeGame();
+    this.adService.showRewardedVideo("tool").then((result) => {
+      if (result.status === "completed") {
+        return Promise.resolve(this.rewardService.grantAdReward({
+          type: "tool",
+          toolType: type
+        })).then((reward) => {
+          this.progress = reward.progress;
+          this.syncToolCountsFromProgress(reward.progress);
+          this.showToast(reward.toastText);
         });
+      }
+      this.showAdFailureToast(result.status);
+      return null;
+    }).catch((error) => {
+      this.showToast("\u6b21\u6570\u589e\u52a0\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5");
+      if (typeof console !== "undefined" && console.warn) {
+        console.warn("grant tool reward failed", error);
+      }
+    }).finally(() => {
+      this.resumeGame();
     });
   }
 
@@ -685,10 +863,18 @@ class GameApp {
       return;
     }
 
+    if (hit(this.buttons.exit, x, y)) {
+      this.playSfx("click");
+      this.scene = "levels";
+      this.assets.stopBgm("gameBgm");
+      this.playBgm("allBgm");
+      return;
+    }
+
     if (hit(this.buttons.next, x, y)) {
       this.playSfx("click");
       if (this.game.lastResult && this.game.lastResult.success) {
-        this.startLevel(Math.min(this.game.level.levelId + 1, levelConfigs.length));
+        this.startLevel(Math.min(this.game.level.levelId + 1, this.levelConfigs.length));
       } else {
         this.scene = "levels";
         this.assets.stopBgm("gameBgm");
@@ -701,6 +887,7 @@ class GameApp {
     if (hit(this.buttons.settingsMusic, x, y)) {
       this.playSfx("click");
       this.musicEnabled = !this.musicEnabled;
+      this.saveAudioSettings();
       if (this.musicEnabled) {
         this.playBgm("allBgm");
       } else {
@@ -712,6 +899,7 @@ class GameApp {
 
     if (hit(this.buttons.settingsSfx, x, y)) {
       this.sfxEnabled = !this.sfxEnabled;
+      this.saveAudioSettings();
       this.playSfx("click");
       return;
     }
@@ -720,6 +908,14 @@ class GameApp {
       this.playSfx("click");
       this.settingsOpen = false;
     }
+  }
+
+  saveAudioSettings() {
+    this.audioSettings = {
+      musicEnabled: !!this.musicEnabled,
+      sfxEnabled: !!this.sfxEnabled
+    };
+    this.progressStore.saveSettings(this.audioSettings);
   }
 
   handleCoinAdDialogTouch(x, y) {
@@ -745,17 +941,17 @@ class GameApp {
     }
 
     if (hit(this.buttons.staminaBuy1, x, y)) {
-      this.openStaminaExchangeConfirm(99, 1);
+      this.openStaminaExchangeConfirm(99, 1, "stamina_1_by_coins");
       return;
     }
 
     if (hit(this.buttons.staminaBuy3, x, y)) {
-      this.openStaminaExchangeConfirm(266, 3);
+      this.openStaminaExchangeConfirm(266, 3, "stamina_3_by_coins");
       return;
     }
 
     if (hit(this.buttons.staminaBuy5, x, y)) {
-      this.openStaminaExchangeConfirm(388, 5);
+      this.openStaminaExchangeConfirm(388, 5, "stamina_5_by_coins");
       return;
     }
 
@@ -765,9 +961,9 @@ class GameApp {
     }
   }
 
-  openStaminaExchangeConfirm(cost, amount) {
+  openStaminaExchangeConfirm(cost, amount, productKey) {
     this.playSfx("click");
-    this.staminaExchangeConfirm = { cost, amount };
+    this.staminaExchangeConfirm = { cost, amount, productKey };
   }
 
   handleStaminaExchangeConfirmTouch(x, y) {
@@ -779,116 +975,104 @@ class GameApp {
 
     if (hit(this.buttons.staminaExchangeConfirm, x, y)) {
       this.playSfx("click");
-      const { cost, amount } = this.staminaExchangeConfirm;
-      const result = this.progressStore.exchangeCoinsForStamina(cost, amount);
-      this.progress = result.progress;
-      this.staminaExchangeConfirm = null;
-      this.staminaShopOpen = false;
-      this.toast = {
-        text: result.success ? `\u83b7\u5f97${amount}\u4f53\u529b` : "\u91d1\u5e01\u4e0d\u8db3",
-        until: Date.now() + 2000
-      };
+      const { cost, amount, productKey } = this.staminaExchangeConfirm;
+      const result = this.rewardService.exchangeCoinsForStamina(cost, amount, productKey);
+      Promise.resolve(result).then((data) => {
+        this.progress = data.progress;
+        this.staminaExchangeConfirm = null;
+        this.staminaShopOpen = false;
+        this.showToast(data.toastText);
+      });
     }
   }
 
   showCoinRewardAd() {
-    if (!COIN_REWARD_AD_UNIT_ID || typeof wx.createRewardedVideoAd !== "function") {
-      this.toast = {
-        text: "\u5e7f\u544a\u6682\u672a\u914d\u7f6e",
-        until: Date.now() + 2000
-      };
-      return;
-    }
-
-    if (!this.coinRewardAd) {
-      this.coinRewardAd = wx.createRewardedVideoAd({ adUnitId: COIN_REWARD_AD_UNIT_ID });
-      this.coinRewardAd.onClose((result) => {
-        if (result && result.isEnded) {
-          this.progress = this.progressStore.addCoins(100);
-          this.toast = {
-            text: "\u83b7\u5f97100\u91d1\u5e01",
-            until: Date.now() + 2000
-          };
-        }
-      });
-      this.coinRewardAd.onError(() => {
-        this.toast = {
-          text: "\u5e7f\u544a\u6682\u65f6\u65e0\u6cd5\u64ad\u653e",
-          until: Date.now() + 2000
-        };
-      });
-    }
-
-    this.coinRewardAd.show().catch(() => {
-      this.coinRewardAd.load()
-        .then(() => this.coinRewardAd.show())
-        .catch(() => {
-          this.toast = {
-            text: "\u5e7f\u544a\u6682\u65f6\u65e0\u6cd5\u64ad\u653e",
-            until: Date.now() + 2000
-          };
-        });
+    this.adService.showRewardedVideo("coin").then((result) => {
+      if (result.status === "completed") {
+        const reward = this.rewardService.grantAdReward({ type: "coin", amount: 100 });
+        this.progress = reward.progress;
+        this.showToast(reward.toastText);
+      } else {
+        this.showAdFailureToast(result.status);
+      }
     });
   }
 
   showStaminaRewardAd() {
-    if (!STAMINA_REWARD_AD_UNIT_ID || typeof wx.createRewardedVideoAd !== "function") {
-      this.toast = {
-        text: "\u5e7f\u544a\u6682\u672a\u914d\u7f6e",
-        until: Date.now() + 2000
-      };
-      return;
-    }
-
-    if (!this.staminaRewardAd) {
-      this.staminaRewardAd = wx.createRewardedVideoAd({ adUnitId: STAMINA_REWARD_AD_UNIT_ID });
-      this.staminaRewardAd.onClose((result) => {
-        if (result && result.isEnded) {
-          this.progress = this.progressStore.addStamina(3);
-          this.toast = {
-            text: "\u83b7\u5f973\u4f53\u529b",
-            until: Date.now() + 2000
-          };
-        }
-      });
-      this.staminaRewardAd.onError(() => {
-        this.toast = {
-          text: "\u5e7f\u544a\u6682\u65f6\u65e0\u6cd5\u64ad\u653e",
-          until: Date.now() + 2000
-        };
-      });
-    }
-
-    this.staminaRewardAd.show().catch(() => {
-      this.staminaRewardAd.load()
-        .then(() => this.staminaRewardAd.show())
-        .catch(() => {
-          this.toast = {
-            text: "\u5e7f\u544a\u6682\u65f6\u65e0\u6cd5\u64ad\u653e",
-            until: Date.now() + 2000
-          };
-        });
+    this.adService.showRewardedVideo("stamina").then((result) => {
+      if (result.status === "completed") {
+        const reward = this.rewardService.grantAdReward({ type: "stamina", amount: 3 });
+        this.progress = reward.progress;
+        this.showToast(reward.toastText);
+      } else {
+        this.showAdFailureToast(result.status);
+      }
     });
   }
 
   startLevel(levelId) {
+    if (this.startingLevel) {
+      return;
+    }
+
+    this.startingLevel = true;
+    this.showToast("\u6b63\u5728\u8fdb\u5165\u5173\u5361");
+    const auth = this.progressStore.loadAuth();
+    const session = auth && auth.token ? Promise.resolve() : (this.sessionPromise || this.syncSession());
+    Promise.all([session, this.ensureLevelConfigs()])
+      .then(() => this.apiClient.startLevel(levelId))
+      .then((progress) => {
+        if (progress) {
+          this.progress = progress;
+          this.syncToolCountsFromProgress(progress);
+        }
+        this.enterLevel(levelId);
+      })
+      .catch((error) => {
+        const message = error && error.message ? error.message : "";
+        if (message.includes("insufficient stamina")) {
+          this.scene = this.scene === "levels" ? "levels" : "home";
+          this.staminaShopOpen = true;
+          this.showToast("\u4f53\u529b\u4e0d\u8db3");
+        } else if (message.includes("missing auth token")) {
+          this.showToast("\u767b\u5f55\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5");
+        } else {
+          this.showToast("\u7f51\u7edc\u5f02\u5e38\uff0c\u8bf7\u91cd\u8bd5");
+        }
+        if (typeof console !== "undefined" && console.warn) {
+          console.warn("start level failed", error);
+        }
+      })
+      .finally(() => {
+        this.startingLevel = false;
+      });
+  }
+
+  enterLevel(levelId) {
     this.scene = "game";
-    this.progress = this.progressStore.load();
-    this.game = new MatchGame(levelId);
+    this.game = new MatchGame(levelId, this.levelConfigs);
     this.gamePaused = false;
     this.pauseStartedAt = 0;
     this.toolAdDialog = null;
-    this.pendingToolReward = null;
     this.previewEndAt = Date.now() + this.game.level.initialPreviewMs;
     this.mismatchTimerAt = 0;
     this.hintIndexes = [];
     this.removedAnimations = [];
     this.previewAgainIndexes = [];
     this.previewAgainEndAt = 0;
-    this.previewAgainCount = 3;
-    this.removePairCount = 3;
+    this.syncToolCountsFromProgress(this.progress);
     this.assets.stopBgm("allBgm");
     this.playBgm("gameBgm");
+  }
+
+  emptySlotsForLevel(level) {
+    const explicitSlots = Array.isArray(level.emptySlots) ? level.emptySlots : [];
+    const totalSlots = level.rows * level.cols;
+    if (totalSlots % 2 === 0) {
+      return explicitSlots;
+    }
+    const centerSlot = Math.floor(totalSlots / 2);
+    return explicitSlots.includes(centerSlot) ? explicitSlots : [...explicitSlots, centerSlot];
   }
 
   flip(cardIndex) {
@@ -919,24 +1103,32 @@ class GameApp {
   }
 
   useHint() {
+    if (!this.game.canUseHint()) {
+      this.playSfx("wrong");
+      return;
+    }
     if (this.progress.hints <= 0) {
       this.openToolAdDialog("hint", "\u63d0\u793a");
       return;
     }
 
-    if (!this.progressStore.spendHint()) {
-      this.openToolAdDialog("hint", "\u63d0\u793a");
-      return;
-    }
-
-    this.progress = this.progressStore.load();
-    this.hintIndexes = this.game.useHint();
-    this.hintEndAt = Date.now() + 1300;
-    this.playSfx(this.hintIndexes.length > 0 ? "right" : "wrong");
+    this.consumeTool("hint", "\u63d0\u793a").then((success) => {
+      if (!success) {
+        return;
+      }
+      this.hintIndexes = this.game.useHint();
+      this.hintEndAt = Date.now() + (this.game.level.hintHighlightMs || 1300);
+      this.playSfx(this.hintIndexes.length > 0 ? "right" : "wrong");
+    });
   }
 
   previewAgain() {
     if (this.previewAgainIndexes.length > 0) {
+      this.playSfx("wrong");
+      return;
+    }
+
+    if (!this.game.canRevealUnmatched()) {
       this.playSfx("wrong");
       return;
     }
@@ -946,35 +1138,46 @@ class GameApp {
       return;
     }
 
-    const indexes = this.game.revealUnmatched();
-    if (indexes.length === 0) {
+    this.consumeTool("previewAgain", "\u518d\u770b\u4e00\u6b21").then((success) => {
+      if (!success) {
+        return;
+      }
+      const indexes = this.game.revealUnmatched();
+      if (indexes.length === 0) {
+        this.playSfx("wrong");
+        return;
+      }
+      this.previewAgainIndexes = indexes;
+      this.previewAgainEndAt = Date.now() + 2000;
+      this.playSfx("right");
+    });
+  }
+
+  removeOnePair() {
+    if (!this.game.canRemovePair()) {
       this.playSfx("wrong");
       return;
     }
 
-    this.previewAgainCount -= 1;
-    this.previewAgainIndexes = indexes;
-    this.previewAgainEndAt = Date.now() + 2000;
-    this.playSfx("right");
-  }
-
-  removeOnePair() {
     if (this.removePairCount <= 0) {
       this.openToolAdDialog("removePair", "\u6d88\u9664\u4e00\u5bf9");
       return;
     }
 
-    const outcome = this.game.removeOnePair();
-    if (outcome.type === "ignored") {
-      this.playSfx("wrong");
-      return;
-    }
-
-    this.removePairCount -= 1;
-    this.playSfx("right");
-    if (outcome.type === "level_complete") {
-      this.onLevelEnded(outcome.result);
-    }
+    this.consumeTool("removePair", "\u6d88\u9664\u4e00\u5bf9").then((success) => {
+      if (!success) {
+        return;
+      }
+      const outcome = this.game.removeOnePair();
+      if (outcome.type === "ignored") {
+        this.playSfx("wrong");
+        return;
+      }
+      this.playSfx("right");
+      if (outcome.type === "level_complete") {
+        this.onLevelEnded(outcome.result);
+      }
+    });
   }
 
   playSfx(key) {
@@ -989,13 +1192,53 @@ class GameApp {
     }
   }
 
+  showToast(text) {
+    if (!text) {
+      return;
+    }
+
+    this.toast = {
+      text,
+      until: Date.now() + 2000
+    };
+  }
+
+  showAdFailureToast(status) {
+    if (status === "closed") {
+      return;
+    }
+
+    this.showToast(status === "unconfigured" ? "\u5e7f\u544a\u6682\u672a\u914d\u7f6e" : "\u5e7f\u544a\u6682\u65f6\u65e0\u6cd5\u64ad\u653e");
+  }
+
   onLevelEnded(result) {
     if (!result || result._saved) {
       return;
     }
 
     result._saved = true;
-    this.progress = this.progressStore.applyResult(result);
+    this.apiClient.submitLevelResult({
+      levelId: result.levelId,
+      success: result.success,
+      reason: result.reason,
+      steps: result.steps,
+      mismatchCount: result.mismatchCount,
+      elapsedMs: result.elapsedMs,
+      stars: result.stars,
+      coinsEarned: result.coinsEarned,
+      usedHints: result.usedHints
+    })
+      .then((progress) => {
+        this.progress = progress;
+        this.syncToolCountsFromProgress(progress);
+      })
+      .catch((error) => {
+        result._saved = false;
+        this.showToast("\u6210\u7ee9\u4fdd\u5b58\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u7f51\u7edc");
+        if (typeof console !== "undefined" && console.warn) {
+          console.warn("submit level result failed", error);
+        }
+      });
   }
 }
 

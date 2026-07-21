@@ -1,13 +1,22 @@
 const ASSET_ROOT = "assets";
 
-const levelConfigs = Array.from({ length: 40 }, (_, index) => {
+const levelConfigs = Array.from({ length: 100 }, (_, index) => {
   const levelId = index + 1;
   const base = {
     levelId,
     mode: "normal",
     themeId: "animal",
-    initialPreviewMs: 2000,
-    flipBackDelayMs: 700
+    initialPreviewMs: levelId <= 10 ? 2500 : (levelId <= 40 ? 2200 : 2000),
+    flipBackDelayMs: levelId <= 30 ? 800 : (levelId <= 70 ? 700 : 600),
+    showSteps: true,
+    showTimer: true,
+    showMismatch: true,
+    hintHighlightMs: 1300,
+    coinRewardBase: 10,
+    coinRewardStar1: 10,
+    coinRewardStar2: 20,
+    coinRewardStar3: 30,
+    staminaCost: 1
   };
 
   if (levelId === 1) {
@@ -44,15 +53,15 @@ const levelConfigs = Array.from({ length: 40 }, (_, index) => {
   if (levelId <= 5) {
     return {
       ...base,
-      rows: 4,
+      rows: 3,
       cols: 4,
-      pairCount: 8,
+      pairCount: 6,
       levelTimeLimitSeconds: 90,
       maxMismatchCount: 10,
-      excellentStepThreshold: 10,
-      normalStepThreshold: 15,
-      excellentTimeThreshold: 50,
-      normalTimeThreshold: 78
+      excellentStepThreshold: 9,
+      normalStepThreshold: 14,
+      excellentTimeThreshold: 45,
+      normalTimeThreshold: 75
     };
   }
 
@@ -61,12 +70,12 @@ const levelConfigs = Array.from({ length: 40 }, (_, index) => {
     rows: 4,
     cols: 4,
     pairCount: 8,
-    levelTimeLimitSeconds: 120,
-    maxMismatchCount: 12,
-    excellentStepThreshold: 12,
-    normalStepThreshold: 18,
-    excellentTimeThreshold: 70,
-    normalTimeThreshold: 105
+    levelTimeLimitSeconds: levelId <= 20 ? 120 : (levelId <= 50 ? 110 : (levelId <= 80 ? 100 : 90)),
+    maxMismatchCount: levelId <= 30 ? 12 : (levelId <= 60 ? 11 : (levelId <= 85 ? 10 : 9)),
+    excellentStepThreshold: levelId <= 30 ? 12 : (levelId <= 70 ? 11 : 10),
+    normalStepThreshold: levelId <= 30 ? 18 : (levelId <= 70 ? 17 : 16),
+    excellentTimeThreshold: levelId <= 30 ? 70 : (levelId <= 70 ? 65 : 60),
+    normalTimeThreshold: levelId <= 30 ? 105 : (levelId <= 70 ? 98 : 90)
   };
 });
 

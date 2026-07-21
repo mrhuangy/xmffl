@@ -11,8 +11,22 @@ function shuffle(items) {
   return result;
 }
 
-function getLevelConfig(levelId) {
-  return levelConfigs.find((level) => level.levelId === levelId) || levelConfigs[levelConfigs.length - 1];
+function getLevelConfig(levelId, levels) {
+  const configs = Array.isArray(levels) && levels.length > 0 ? levels : levelConfigs;
+  return configs.find((level) => level.levelId === levelId) || configs[configs.length - 1];
+}
+
+function coinRewardForStars(level, stars) {
+  if (stars === 1 && typeof level.coinRewardStar1 === "number" && level.coinRewardStar1 > 0) {
+    return level.coinRewardStar1;
+  }
+  if (stars === 2 && typeof level.coinRewardStar2 === "number" && level.coinRewardStar2 > 0) {
+    return level.coinRewardStar2;
+  }
+  if (stars === 3 && typeof level.coinRewardStar3 === "number" && level.coinRewardStar3 > 0) {
+    return level.coinRewardStar3;
+  }
+  return stars > 0 ? stars * (level.coinRewardBase || 10) : 0;
 }
 
 function createDeck(level) {
@@ -33,8 +47,8 @@ function createDeck(level) {
 }
 
 class MatchGame {
-  constructor(levelId) {
-    this.level = getLevelConfig(levelId);
+  constructor(levelId, levels) {
+    this.level = getLevelConfig(levelId, levels);
     this.cards = createDeck(this.level);
     this.state = "previewing_cards";
     this.openedIndexes = [];
@@ -160,6 +174,10 @@ class MatchGame {
     return [first.index, second.index];
   }
 
+  canUseHint() {
+    return (this.state === "idle" || this.state === "first_card_opened") && this.hasFaceDownPair();
+  }
+
   revealUnmatched() {
     if (this.state !== "idle") {
       return [];
@@ -175,6 +193,10 @@ class MatchGame {
       return { ...card, state: "face_up" };
     });
     return indexes;
+  }
+
+  canRevealUnmatched() {
+    return this.state === "idle" && this.cards.some((card) => card.state === "face_down");
   }
 
   hideRevealed(indexes) {
@@ -215,6 +237,24 @@ class MatchGame {
     return { type: "removed_pair" };
   }
 
+  canRemovePair() {
+    return this.state === "idle" && this.hasFaceDownPair();
+  }
+
+  hasFaceDownPair() {
+    const seen = {};
+    return this.cards.some((card) => {
+      if (card.state !== "face_down") {
+        return false;
+      }
+      if (seen[card.pairId]) {
+        return true;
+      }
+      seen[card.pairId] = true;
+      return false;
+    });
+  }
+
   createResult(reason) {
     const success = reason === "completed";
     const stars = success ? this.calculateStars() : 0;
@@ -226,7 +266,7 @@ class MatchGame {
       mismatchCount: this.mismatchCount,
       elapsedMs: this.elapsedMs,
       stars,
-      coinsEarned: success ? stars * 10 : 0,
+      coinsEarned: success ? coinRewardForStars(this.level, stars) : 0,
       usedHints: this.usedHints,
       completedAt: Date.now()
     };

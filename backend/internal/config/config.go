@@ -6,6 +6,7 @@ type Config struct {
 	HTTPAddr    string
 	MySQLDSN    string
 	AllowOrigin string
+	JWTSecret   string
 }
 
 func Load() Config {
@@ -13,6 +14,7 @@ func Load() Config {
 		HTTPAddr:    getEnv("HTTP_ADDR", ":8080"),
 		MySQLDSN:    getEnv("MYSQL_DSN", "fpxxl:fpxxl@tcp(127.0.0.1:3306)/fpxxl?parseTime=true&loc=Local"),
 		AllowOrigin: getEnv("ALLOW_ORIGIN", "*"),
+		JWTSecret:   getEnv("ADMIN_JWT_SECRET", "local-development-secret-change-before-production"),
 	}
 }
 

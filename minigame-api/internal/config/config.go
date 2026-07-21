@@ -3,10 +3,16 @@ package config
 import "os"
 
 type Config struct {
-	HTTPAddr    string
-	MySQLDSN    string
-	AllowOrigin string
-	GinMode     string
+	HTTPAddr       string
+	MySQLDSN       string
+	AllowOrigin    string
+	GinMode        string
+	WechatMiniGame WechatMiniGameConfig
+}
+
+type WechatMiniGameConfig struct {
+	AppID  string
+	Secret string
 }
 
 func Load() Config {
@@ -15,6 +21,10 @@ func Load() Config {
 		MySQLDSN:    env("MYSQL_DSN", "fpxxl:fpxxl@tcp(127.0.0.1:3306)/fpxxl?parseTime=true&loc=Local"),
 		AllowOrigin: env("ALLOW_ORIGIN", "*"),
 		GinMode:     env("GIN_MODE", "debug"),
+		WechatMiniGame: WechatMiniGameConfig{
+			AppID:  env("WECHAT_MINIGAME_APPID", ""),
+			Secret: env("WECHAT_MINIGAME_SECRET", ""),
+		},
 	}
 }
 

@@ -189,6 +189,12 @@
 | `flipBackDelayMs` | 控制错误匹配展示时间 |
 | `levelTimeLimitSeconds` | 控制当局时长上限，默认 120 秒 |
 | `maxMismatchCount` | 控制最大允许错配次数，默认 12 次 |
+| `showSteps` | 控制是否显示步数，默认显示 |
+| `showTimer` | 控制是否显示倒计时，默认显示 |
+| `showMismatch` | 控制是否显示错配次数，默认显示 |
+| `hintHighlightMs` | 控制提示高亮时长，默认 1300 毫秒 |
+| `coinRewardBase` | 控制每颗星基础金币奖励，默认 10 |
+| `staminaCost` | 控制进入关卡消耗体力，默认 1 |
 | `excellentStepThreshold` | 3 星步数阈值 |
 | `normalStepThreshold` | 2 星步数阈值 |
 | `excellentTimeThreshold` | 3 星用时阈值 |

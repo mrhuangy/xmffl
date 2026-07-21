@@ -12,6 +12,12 @@ CREATE TABLE IF NOT EXISTS level_configs (
   flip_back_delay_ms INT NOT NULL DEFAULT 700,
   level_time_limit_seconds INT NOT NULL DEFAULT 120,
   max_mismatch_count INT NOT NULL DEFAULT 12,
+  show_steps TINYINT(1) NOT NULL DEFAULT 1,
+  show_timer TINYINT(1) NOT NULL DEFAULT 1,
+  show_mismatch TINYINT(1) NOT NULL DEFAULT 1,
+  hint_highlight_ms INT NOT NULL DEFAULT 1300,
+  coin_reward_base INT NOT NULL DEFAULT 10,
+  stamina_cost INT NOT NULL DEFAULT 1,
   excellent_step_threshold INT NOT NULL,
   normal_step_threshold INT NOT NULL,
   excellent_time_threshold INT NULL,
@@ -21,7 +27,13 @@ CREATE TABLE IF NOT EXISTS level_configs (
   enabled TINYINT(1) NOT NULL DEFAULT 1,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  CONSTRAINT chk_level_grid CHECK (rows_count * cols_count = pair_count * 2)
+  CONSTRAINT chk_level_grid CHECK (
+    rows_count * cols_count = pair_count * 2
+    OR (
+      rows_count * cols_count = pair_count * 2 + 1
+      AND MOD(rows_count * cols_count, 2) = 1
+    )
+  )
 );
 
 CREATE TABLE IF NOT EXISTS ad_frequency_configs (

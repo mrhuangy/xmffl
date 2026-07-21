@@ -88,6 +88,14 @@ function strokeTextCenter(ctx, text, x, y, width, size, color, strokeColor, line
   ctx.fillText(text, x + width / 2, y);
 }
 
+function ellipsize(text, maxLength) {
+  const chars = Array.from(String(text || ""));
+  if (chars.length <= maxLength) {
+    return chars.join("");
+  }
+  return `${chars.slice(0, Math.max(0, maxLength - 1)).join("")}...`;
+}
+
 class Renderer {
   constructor(ctx, assets) {
     this.ctx = ctx;
@@ -104,17 +112,19 @@ class Renderer {
       height,
       buttons,
       progress,
+      player,
       toast,
       settingsOpen,
       coinAdDialogOpen,
       staminaShopOpen,
       staminaExchangeConfirm,
-      settings
+      settings,
+      unlimitedStamina
     } = state;
     const ctx = this.ctx;
     drawImageCover(ctx, this.assets.image("homeBg"), 0, 0, width, height);
 
-    this.homeHud(width, height, buttons, progress);
+    this.homeHud(width, height, buttons, progress, player, unlimitedStamina);
 
     drawImageContain(ctx, this.assets.image("logo"), width * 0.065, height * 0.145, width * 0.88, height * 0.27);
 
@@ -157,7 +167,7 @@ class Renderer {
     );
     strokeTextCenter(
       ctx,
-      "\u9650\u65f6\u6a21\u5f0f",
+      "\u65e0\u5c3d\u6a21\u5f0f",
       buttons.timeMode.x,
       buttons.timeMode.y + buttons.timeMode.h * 0.5,
       buttons.timeMode.w,
@@ -179,11 +189,11 @@ class Renderer {
       this.coinAdDialog(width, height, buttons);
     }
 
-    if (staminaShopOpen) {
+    if (!unlimitedStamina && staminaShopOpen) {
       this.staminaShop(width, height, buttons);
     }
 
-    if (staminaExchangeConfirm) {
+    if (!unlimitedStamina && staminaExchangeConfirm) {
       this.staminaExchangeDialog(width, height, buttons, staminaExchangeConfirm);
     }
   }
@@ -409,7 +419,7 @@ class Renderer {
     ctx.restore();
   }
 
-  homeHud(width, height, buttons, progress) {
+  homeHud(width, height, buttons, progress, player, unlimitedStamina) {
     const ctx = this.ctx;
     const top = Math.max(34, height * 0.05);
     const playerH = Math.max(38, Math.min(46, width * 0.11));
@@ -421,19 +431,20 @@ class Renderer {
     const staminaW = Math.max(62, Math.min(70, width * 0.165));
     const staminaX = playerX + playerW + Math.max(8, width * 0.02);
     const statY = top + Math.max(2, height * 0.008);
-    const coinX = staminaX + staminaW + gap;
+    const coinX = unlimitedStamina ? staminaX : staminaX + staminaW + gap;
     const safeRight = width - 92;
     const coinW = Math.max(62, Math.min(Math.max(66, Math.min(74, width * 0.175)), safeRight - coinX));
 
-    this.playerPlate(playerX, top, playerW, playerH, avatar);
-    const stamina = progress.stamina ?? 5;
-    const maxStamina = progress.maxStamina ?? 5;
-    this.resourcePlate(staminaX, statY, staminaW, statH, "heart", String(stamina), `${maxStamina}\u5df2\u6ee1`);
+    this.playerPlate(playerX, top, playerW, playerH, avatar, player);
+    if (!unlimitedStamina) {
+      const stamina = progress.stamina ?? 5;
+      this.resourcePlate(staminaX, statY, staminaW, statH, "heart", String(stamina), this.staminaStatusText(progress));
+    }
     this.resourcePlate(coinX, statY, coinW, statH, "coin", String(progress.coins || 0), "");
     this.operationButton(buttons.operation);
   }
 
-  playerPlate(x, y, w, h, avatarSize) {
+  playerPlate(x, y, w, h, avatarSize, player) {
     const ctx = this.ctx;
     ctx.save();
     ctx.fillStyle = "rgba(95,54,19,0.25)";
@@ -463,7 +474,8 @@ class Renderer {
     drawImageCover(ctx, this.assets.image("animal:panda"), x + 5, y + 5, avatarSize - 10, avatarSize - 10);
     ctx.restore();
 
-    strokeTextCenter(ctx, "\u73a9\u5bb6123", bodyX + 14, y + h * 0.36, bodyW - 22, Math.max(15, h * 0.31), "#ffffff", "#8f4f17", 3, "900");
+    const nickname = ellipsize((player && player.nickname) || "\u73a9\u5bb6", 5);
+    strokeTextCenter(ctx, nickname, bodyX + 14, y + h * 0.36, bodyW - 22, Math.max(15, h * 0.31), "#ffffff", "#8f4f17", 3, "900");
     this.starBadge(bodyX + 18, y + h * 0.72, h * 0.22);
     ctx.fillStyle = "#93de56";
     roundRect(ctx, bodyX + 38, y + h * 0.65, bodyW - 58, h * 0.16, h * 0.08);
@@ -676,12 +688,15 @@ class Renderer {
       progress,
       toast,
       staminaShopOpen,
-      staminaExchangeConfirm
+      staminaExchangeConfirm,
+      unlimitedStamina
     } = state;
     const ctx = this.ctx;
     drawImageCover(ctx, this.assets.image("homeBg"), 0, 0, width, height);
     drawImageContain(ctx, this.assets.image("back"), buttons.back.x, buttons.back.y, buttons.back.w, buttons.back.h);
-    this.levelTopStamina(width, height, progress);
+    if (!unlimitedStamina) {
+      this.levelTopStamina(width, height, progress);
+    }
 
     const titleW = Math.min(width * 0.76, 380);
     const titleH = titleW * (576 / 1824);
@@ -699,11 +714,11 @@ class Renderer {
     }
 
     this.levelPager(width, panelY + panelH - 43, currentPage, pageCount);
-    if (staminaShopOpen) {
+    if (!unlimitedStamina && staminaShopOpen) {
       this.staminaShop(width, height, buttons);
     }
 
-    if (staminaExchangeConfirm) {
+    if (!unlimitedStamina && staminaExchangeConfirm) {
       this.staminaExchangeDialog(width, height, buttons, staminaExchangeConfirm);
     }
 
@@ -719,7 +734,24 @@ class Renderer {
     const staminaY = Math.max(44, height * 0.055);
     const stamina = progress.stamina ?? 5;
     const maxStamina = progress.maxStamina ?? 5;
-    this.resourcePlate(staminaX, staminaY, staminaW, statH, "heart", String(stamina), `${maxStamina}\u5df2\u6ee1`);
+    this.resourcePlate(staminaX, staminaY, staminaW, statH, "heart", String(stamina), this.staminaStatusText(progress));
+  }
+
+  staminaStatusText(progress) {
+    const stamina = progress.stamina ?? 5;
+    const maxStamina = progress.maxStamina ?? 5;
+    if (stamina >= maxStamina) {
+      return "\u5df2\u6ee1";
+    }
+    const nextRecoverAt = progress.nextStaminaRecoverAt || 0;
+    const remainMs = nextRecoverAt - Date.now();
+    if (remainMs <= 0) {
+      return "00:00";
+    }
+    const totalSeconds = Math.ceil(remainMs / 1000);
+    const minute = Math.floor(totalSeconds / 60);
+    const second = totalSeconds % 60;
+    return `${String(minute).padStart(2, "0")}:${String(second).padStart(2, "0")}`;
   }
 
   levelPanel(x, y, w, h) {
@@ -1030,13 +1062,33 @@ class Renderer {
     const y = height * 0.13;
     const w = width * 0.27;
     const h = 58;
-    this.gameStatCard(width * 0.08, y, w, h, "\u7b49\u7ea7", `1-${game.level.levelId}`, "flower");
-    this.gameStatCard(width * 0.365, y, w, h, "\u65f6\u95f4", this.formatTime(game.remainingSeconds()), "clock");
-    this.gameStatCard(width * 0.65, y, w, h, "\u5f97\u5206", String(game.steps), "star");
+    const items = [{ label: "\u7b49\u7ea7", value: `1-${game.level.levelId}`, icon: "flower" }];
+    if (game.level.showTimer !== false) {
+      items.push({ label: "\u65f6\u95f4", value: this.formatTime(game.remainingSeconds()), icon: "clock" });
+    }
+    if (game.level.showSteps !== false) {
+      items.push({ label: "\u6b65\u6570", value: String(game.steps), icon: "star" });
+    }
+    if (game.level.showMismatch !== false) {
+      items.push({ label: "\u5931\u8bef", value: `${game.mismatchCount}/${game.level.maxMismatchCount}`, icon: "flower" });
+    }
+
+    const gap = width * 0.02;
+    const itemW = Math.min(w, (width * 0.84 - gap * (items.length - 1)) / items.length);
+    const startX = (width - itemW * items.length - gap * (items.length - 1)) / 2;
+    items.forEach((item, index) => {
+      this.gameStatCard(startX + index * (itemW + gap), y, itemW, h, item.label, item.value, item.icon);
+    });
   }
 
   gameStatCard(x, y, w, h, label, value, icon) {
     const ctx = this.ctx;
+    const isClock = icon === "clock";
+    const iconSize = isClock ? 9 : 11;
+    const iconX = x + (isClock ? w * 0.12 : w * 0.18);
+    const iconY = y + 39;
+    const valueLeft = x + (isClock ? w * 0.38 : w * 0.34);
+    const valueWidth = Math.max(18, w - (valueLeft - x) - w * 0.08);
     ctx.save();
     ctx.fillStyle = "rgba(104, 64, 20, 0.15)";
     roundRect(ctx, x + 2, y + 3, w, h, 15);
@@ -1049,34 +1101,32 @@ class Renderer {
     ctx.stroke();
     fillTextCenter(ctx, label, x, y + 17, w, 15, "#7b3f17", "900");
     if (icon === "star") {
-      this.starPath(x + w * 0.28, y + 39, 11, "#ffd84d", "#d98d22");
+      this.starPath(iconX, iconY, iconSize, "#ffd84d", "#d98d22");
     } else if (icon === "clock") {
-      const clockX = x + w * 0.24;
-      const clockY = y + 39;
       ctx.fillStyle = "#ffffff";
       ctx.strokeStyle = "#2f9add";
       ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.arc(clockX, clockY, 11, 0, Math.PI * 2);
+      ctx.arc(iconX, iconY, iconSize, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
       ctx.fillStyle = "#2f9add";
       ctx.beginPath();
-      ctx.arc(clockX, clockY, 2.2, 0, Math.PI * 2);
+      ctx.arc(iconX, iconY, 2.2, 0, Math.PI * 2);
       ctx.fill();
       ctx.strokeStyle = "#2f9add";
       ctx.lineCap = "round";
       ctx.lineWidth = 2.5;
       ctx.beginPath();
-      ctx.moveTo(clockX, clockY);
-      ctx.lineTo(clockX, clockY - 6);
-      ctx.moveTo(clockX, clockY);
-      ctx.lineTo(clockX + 5, clockY + 3);
+      ctx.moveTo(iconX, iconY);
+      ctx.lineTo(iconX, iconY - 5.2);
+      ctx.moveTo(iconX, iconY);
+      ctx.lineTo(iconX + 4.3, iconY + 2.6);
       ctx.stroke();
     } else {
-      this.starPath(x + w * 0.28, y + 39, 11, "#9bdc59", "#65aa36");
+      this.starPath(iconX, iconY, iconSize, "#9bdc59", "#65aa36");
     }
-    fillTextCenter(ctx, value, x + w * 0.34, y + 39, w * 0.58, icon === "clock" ? 21 : 24, "#7b3f17", "900");
+    fillTextCenter(ctx, value, valueLeft, y + 39, valueWidth, isClock ? 19 : 24, "#7b3f17", "900");
     ctx.restore();
   }
 
@@ -1296,6 +1346,7 @@ class Renderer {
     }
     fillTextCenter(ctx, `\u7528\u65f6 ${Math.ceil(result.elapsedMs / 1000)}s  \u6b65\u6570 ${result.steps}`, x, y + 166, panelW, 17, "#4f6f7d", "600");
     this.drawButton(buttons.retry, "\u91cd\u73a9", "#f7b84b");
+    this.drawButton(buttons.exit, "\u9000\u51fa", "#d5d0c4");
     this.drawButton(buttons.next, result.success ? "\u4e0b\u4e00\u5173" : "\u9009\u5173", "#76d6bd");
   }
 

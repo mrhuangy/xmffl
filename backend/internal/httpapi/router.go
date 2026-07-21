@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"log"
@@ -16,17 +17,32 @@ import (
 type Handler struct {
 	repo        store.Repository
 	allowOrigin string
+	jwtSecret   []byte
 }
 
-func NewRouter(repo store.Repository, allowOrigin string) http.Handler {
-	h := &Handler{repo: repo, allowOrigin: allowOrigin}
+func NewRouter(repo store.Repository, allowOrigin, jwtSecret string) http.Handler {
+	h := &Handler{repo: repo, allowOrigin: allowOrigin, jwtSecret: []byte(jwtSecret)}
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", h.health)
+	mux.HandleFunc("POST /api/auth/login", h.login)
+	mux.HandleFunc("GET /api/auth/me", h.me)
 	mux.HandleFunc("GET /api/config/levels", h.listLevels)
 	mux.HandleFunc("PUT /api/admin/levels/", h.upsertLevel)
 	mux.HandleFunc("GET /api/config/ads", h.getAdConfig)
 	mux.HandleFunc("PUT /api/admin/config/ads", h.saveAdConfig)
+	mux.HandleFunc("GET /api/admin/players", h.listAdminPlayers)
+	mux.HandleFunc("GET /api/admin/players/", h.getAdminPlayer)
+	mux.HandleFunc("GET /api/admin/users", h.listAdmins)
+	mux.HandleFunc("POST /api/admin/users", h.createAdmin)
+	mux.HandleFunc("GET /api/admin/users/", h.getAdmin)
+	mux.HandleFunc("PUT /api/admin/users/", h.updateAdmin)
+	mux.HandleFunc("DELETE /api/admin/users/", h.deleteAdmin)
+	mux.HandleFunc("GET /api/admin/system-controls", h.listSystemControls)
+	mux.HandleFunc("POST /api/admin/system-controls", h.createSystemControl)
+	mux.HandleFunc("GET /api/admin/system-controls/", h.getSystemControl)
+	mux.HandleFunc("PUT /api/admin/system-controls/", h.updateSystemControl)
+	mux.HandleFunc("DELETE /api/admin/system-controls/", h.deleteSystemControl)
 	mux.HandleFunc("GET /api/player/progress", h.getProgress)
 	mux.HandleFunc("POST /api/player/progress", h.saveProgress)
 	mux.HandleFunc("POST /api/player/level-results", h.saveLevelResult)
@@ -40,12 +56,20 @@ func NewRouter(repo store.Repository, allowOrigin string) http.Handler {
 func (h *Handler) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", h.allowOrigin)
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Openid")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Openid")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
+		}
+		if h.requiresAdmin(r) {
+			claims, err := h.authenticate(r)
+			if err != nil {
+				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "登录状态已失效，请重新登录"})
+				return
+			}
+			r = r.WithContext(withAdminClaims(r.Context(), claims))
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -112,6 +136,46 @@ func (h *Handler) saveAdConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+}
+
+func (h *Handler) listAdminPlayers(w http.ResponseWriter, r *http.Request) {
+	page := queryInt(r, "page", 1)
+	pageSize := queryInt(r, "pageSize", 20)
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+	status := r.URL.Query().Get("status")
+	if status != "" && status != "active" && status != "blocked" && status != "deleted" {
+		writeBadRequest(w, "invalid player status")
+		return
+	}
+	players, total, err := h.repo.ListAdminPlayers(r.Context(), strings.TrimSpace(r.URL.Query().Get("keyword")), status, (page-1)*pageSize, pageSize)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"players": players, "total": total, "page": page, "pageSize": pageSize})
+}
+
+func (h *Handler) getAdminPlayer(w http.ResponseWriter, r *http.Request) {
+	id, err := pathUint64(r.URL.Path, "/api/admin/players/")
+	if err != nil {
+		writeBadRequest(w, err.Error())
+		return
+	}
+	detail, err := h.repo.GetAdminPlayer(r.Context(), id)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "用户不存在"})
+		return
+	}
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, detail)
 }
 
 func (h *Handler) getProgress(w http.ResponseWriter, r *http.Request) {
@@ -284,6 +348,14 @@ func pathInt(path, prefix string) (int, error) {
 	return strconv.Atoi(value)
 }
 
+func pathUint64(path, prefix string) (uint64, error) {
+	value := strings.TrimPrefix(path, prefix)
+	if value == "" || value == path {
+		return 0, errors.New("missing id in path")
+	}
+	return strconv.ParseUint(value, 10, 64)
+}
+
 func validateLevel(level domain.LevelConfig) error {
 	if level.LevelID <= 0 {
 		return errors.New("levelId must be positive")
@@ -291,8 +363,8 @@ func validateLevel(level domain.LevelConfig) error {
 	if level.Rows <= 0 || level.Cols <= 0 || level.PairCount <= 0 {
 		return errors.New("rows, cols and pairCount must be positive")
 	}
-	if level.Rows*level.Cols != level.PairCount*2 {
-		return errors.New("rows * cols must equal pairCount * 2")
+	if !validLevelGrid(level.Rows, level.Cols, level.PairCount) {
+		return errors.New("rows * cols must equal pairCount * 2, or equal pairCount * 2 + 1 for center empty slot")
 	}
 	if level.Mode == "" {
 		return errors.New("mode is required")
@@ -301,4 +373,10 @@ func validateLevel(level domain.LevelConfig) error {
 		return errors.New("themeId is required")
 	}
 	return nil
+}
+
+func validLevelGrid(rows int, cols int, pairCount int) bool {
+	totalSlots := rows * cols
+	cardSlots := pairCount * 2
+	return totalSlots == cardSlots || (totalSlots == cardSlots+1 && totalSlots%2 == 1)
 }

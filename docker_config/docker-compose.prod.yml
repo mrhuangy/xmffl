@@ -1,0 +1,65 @@
+services:
+  backend:
+    build:
+      context: ../backend
+    container_name: fpxxl-backend
+    environment:
+      HTTP_ADDR: ":8080"
+      MYSQL_DSN: ${MYSQL_DSN:-fpxxl:fpxxl@tcp(mysql:3306)/fpxxl?parseTime=true&loc=Local}
+      ALLOW_ORIGIN: ${ALLOW_ORIGIN:-*}
+      ADMIN_JWT_SECRET: ${ADMIN_JWT_SECRET:-local-development-secret-change-before-production}
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  minigame-api:
+    build:
+      context: ../minigame-api
+    container_name: fpxxl-minigame-api
+    environment:
+      HTTP_ADDR: ":8090"
+      MYSQL_DSN: ${MYSQL_DSN:-fpxxl:fpxxl@tcp(mysql:3306)/fpxxl?parseTime=true&loc=Local}
+      ALLOW_ORIGIN: ${ALLOW_ORIGIN:-*}
+      GIN_MODE: ${GIN_MODE:-release}
+      WECHAT_MINIGAME_APPID: ${WECHAT_MINIGAME_APPID:-}
+      WECHAT_MINIGAME_SECRET: ${WECHAT_MINIGAME_SECRET:-}
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:${MINIGAME_API_PORT:-8090}:8090"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  admin:
+    build:
+      context: ../admin
+    container_name: fpxxl-admin
+    ports:
+      - "127.0.0.1:${ADMIN_PORT:-5173}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    restart: "no"
+
+volumes:
+  mysql-data:

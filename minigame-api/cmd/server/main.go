@@ -33,7 +33,7 @@ func main() {
 	}
 
 	repo := repository.NewMySQLRepository(db)
-	playerService := service.NewPlayerService(repo)
+	playerService := service.NewPlayerService(repo, cfg.WechatMiniGame)
 	gameService := service.NewGameService(repo)
 	shopService := service.NewShopService(repo)
 	apiHandler := handler.New(repo, playerService, gameService, shopService)
