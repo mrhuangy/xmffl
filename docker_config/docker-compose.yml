@@ -1,3 +1,5 @@
+name: fpxxl
+
 services:
   mysql:
     image: mysql:8.4
@@ -68,20 +70,16 @@ services:
     restart: unless-stopped
 
   admin:
-    build:
-      context: ../admin
-    container_name: fpxxl-admin
-    ports:
-      - "127.0.0.1:${ADMIN_PORT:-5173}:80"
-    depends_on:
-      backend:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
-      interval: 10s
-      timeout: 3s
-      retries: 12
-    restart: unless-stopped
+    image: node:20-alpine
+    container_name: fpxxl-admin-build
+    working_dir: /app
+    volumes:
+      - ../admin:/app
+      - ../admin/dist:/app/dist
+    command: sh -c "npm ci --include=dev && npm run build"
+    environment:
+      NODE_ENV: production
+    restart: "no"
 
   nginx:
     image: nginx:1.27-alpine
@@ -90,9 +88,10 @@ services:
       - "${NGINX_HTTP_PORT:-80}:80"
     volumes:
       - ./deploy/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ../admin/dist:/var/www/admin:ro
     depends_on:
       admin:
-        condition: service_healthy
+        condition: service_completed_successfully
       backend:
         condition: service_healthy
       minigame-api:

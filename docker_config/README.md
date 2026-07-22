@@ -62,4 +62,8 @@ docker compose config
 docker compose ps
 docker compose logs -f nginx
 docker compose down
+
+
+docker compose -f docker-compose.prod.yml  up
+docker compose -f docker-compose.prod.yml  down
 ```

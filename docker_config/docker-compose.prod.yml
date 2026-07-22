@@ -1,4 +1,28 @@
+name: fpxxl
+
 services:
+  mysql:
+    image: mysql:8.4
+    container_name: fpxxl-mysql
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-fpxxl}
+      MYSQL_USER: ${MYSQL_USER:-fpxxl}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-fpxxl}
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./deploy/mysql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-ufpxxl", "-pfpxxl"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
   backend:
     build:
       context: ../backend
@@ -11,6 +35,9 @@ services:
       TZ: Asia/Shanghai
     ports:
       - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
       interval: 10s
@@ -32,6 +59,9 @@ services:
       TZ: Asia/Shanghai
     ports:
       - "127.0.0.1:${MINIGAME_API_PORT:-8090}:8090"
+    depends_on:
+      mysql:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/healthz"]
       interval: 10s
@@ -42,14 +72,11 @@ services:
   admin:
     build:
       context: ../admin
+      target: build
     container_name: fpxxl-admin
-    ports:
-      - "127.0.0.1:${ADMIN_PORT:-5173}:80"
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
-      interval: 10s
-      timeout: 3s
-      retries: 12
+    command: ["sh", "-c", "rm -rf /output/* && cp -a /src/dist/. /output/"]
+    volumes:
+      - ../admin/dist:/output
     restart: "no"
 
 volumes:
