@@ -14,7 +14,7 @@ services:
     ports:
       - "127.0.0.1:${MYSQL_PORT:-3306}:3306"
     volumes:
-      - mysql-data:/var/lib/mysql
+      - ./mysql-data:/var/lib/mysql
       - ./deploy/mysql:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-ufpxxl", "-pfpxxl"]
@@ -78,6 +78,3 @@ services:
     volumes:
       - ../admin/dist:/output
     restart: "no"
-
-volumes:
-  mysql-data:

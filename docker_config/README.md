@@ -2,6 +2,12 @@
 
 本目录用于启动本地 MySQL、运营后台 API、小游戏 API、后台页面和统一 nginx 网关。
 
+MySQL 数据保存在 `docker_config/mysql-data/`，与 `deploy/` 同级。该目录已加入
+Git 忽略，停止或删除容器不会删除其中的数据。不要手工清空此目录。
+
+如果此前使用 Docker 命名卷 `fpxxl_mysql-data`，切换配置前必须先迁移数据；
+直接重新创建容器会得到一个空数据库。推荐先使用 `mysqldump` 导出，切换挂载后再导入。
+
 ## 启动
 
 ```bash
