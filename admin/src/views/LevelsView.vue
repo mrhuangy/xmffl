@@ -59,7 +59,7 @@ async function loadLevels() {
 
 function openEditor(level) {
   Object.keys(form).forEach((key) => delete form[key]);
-  Object.assign(form, level ? structuredClone(level) : defaults());
+  Object.assign(form, level ? { ...level } : defaults());
   drawerOpen.value = true;
 }
 

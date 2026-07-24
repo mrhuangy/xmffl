@@ -89,6 +89,7 @@ services:
     volumes:
       - ./deploy/nginx/conf.d:/etc/nginx/conf.d:ro
       - ../admin/dist:/var/www/admin:ro
+      - ../wechat_minigame/assets:/var/www/minigame-assets:ro
     depends_on:
       admin:
         condition: service_completed_successfully

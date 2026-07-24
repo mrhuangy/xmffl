@@ -19,6 +19,6 @@ func (s *GameService) StartLevel(ctx context.Context, playerID uint64, levelID i
 	return s.repo.StartLevel(ctx, playerID, levelID)
 }
 
-func (s *GameService) SubmitLevelResult(ctx context.Context, player domain.Player, result domain.LevelResult) (domain.PlayerProgress, error) {
+func (s *GameService) SubmitLevelResult(ctx context.Context, player domain.Player, result domain.LevelResult) (domain.PlayerProgress, domain.LevelResultRewards, error) {
 	return s.repo.SubmitLevelResult(ctx, player, result)
 }

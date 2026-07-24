@@ -1,7 +1,7 @@
 const { AssetLoader } = require("./assets");
 const { ApiClient } = require("./api-client");
 const { AdService } = require("./ad-service");
-const { imageAssets, audioAssets, levelConfigs: defaultLevelConfigs } = require("./config");
+const { imageAssets, audioAssets, animalIcons, levelConfigs: defaultLevelConfigs } = require("./config");
 const { MatchGame } = require("./game-logic");
 const { Renderer, clamp } = require("./renderer");
 const { ProgressStore } = require("./storage");
@@ -57,6 +57,7 @@ class GameApp {
     this.dpr = 1;
     this.sessionReady = false;
     this.sessionPromise = null;
+    this.imageLoadPromises = {};
     this.startingLevel = false;
     this.staminaRefreshPromise = null;
     this.needsStaminaSync = false;
@@ -72,17 +73,77 @@ class GameApp {
     }
 
     this.assets.loadAudio(audioAssets);
-    this.levelConfigPromise = this.syncInitConfig();
-    this.sessionPromise = this.syncSession();
-    this.assets.loadImages(imageAssets, (loaded, total) => {
-      this.loadingProgress = total > 0 ? loaded / total : 1;
-    }).then(() => {
+    const criticalImages = {
+      loadingBg: imageAssets.loadingBg,
+      loading: imageAssets.loading,
+      startButton: imageAssets.startButton
+    };
+    this.loadImagesOnce("critical", criticalImages).then(() => {
       this.loadingProgress = 1;
       this.scene = "home";
       this.playBgm("allBgm");
+      this.loadImagesOnce("home", this.homeImageAssets());
+      setTimeout(() => {
+        this.levelConfigPromise = this.syncInitConfig();
+        this.sessionPromise = this.syncSession();
+      }, 800);
     });
 
     this.loop();
+  }
+
+  loadImagesOnce(name, map, onProgress) {
+    if (!this.imageLoadPromises[name]) {
+      this.imageLoadPromises[name] = this.assets.loadImages(map, onProgress);
+    }
+    return this.imageLoadPromises[name];
+  }
+
+  homeImageAssets() {
+    return {
+      homeBg: imageAssets.homeBg,
+      logo: imageAssets.logo,
+      startButton: imageAssets.startButton,
+      selectButton: imageAssets.selectButton,
+      timeModeButton: imageAssets.timeModeButton,
+      "animal:panda": imageAssets["animal:panda"]
+    };
+  }
+
+  levelImageAssets() {
+    return {
+      homeBg: imageAssets.homeBg,
+      back: imageAssets.back,
+      selectTitle: imageAssets.selectTitle,
+      blockNow: imageAssets.blockNow,
+      blockNo: imageAssets.blockNo,
+      blockAlready: imageAssets.blockAlready,
+      lock: imageAssets.lock,
+      winStar: imageAssets.winStar,
+      lossStar: imageAssets.lossStar
+    };
+  }
+
+  gameImageAssets(levelId) {
+    const level = this.levelConfigs.find((item) => item.levelId === levelId) || {};
+    const pairCount = Math.max(1, Math.min(level.pairCount || 8, animalIcons.length));
+    const assets = {
+      gameBg: imageAssets.gameBg,
+      cardBack: imageAssets.cardBack,
+      back: imageAssets.back,
+      toolBulb: imageAssets.toolBulb,
+      toolMagnifier: imageAssets.toolMagnifier,
+      toolEraser: imageAssets.toolEraser,
+      winStar: imageAssets.winStar,
+      lossStar: imageAssets.lossStar
+    };
+    for (let index = 0; index < pairCount; index += 1) {
+      const icon = animalIcons[index];
+      if (icon) {
+        assets[`animal:${icon}`] = imageAssets[`animal:${icon}`];
+      }
+    }
+    return assets;
   }
 
   syncSession() {
@@ -95,6 +156,7 @@ class GameApp {
           this.progress = this.progressStore.load();
           this.syncToolCountsFromProgress(this.progress);
           this.sessionReady = true;
+          return this.progress;
         }
         return this.apiClient.fetchProgress();
       })
@@ -620,8 +682,13 @@ class GameApp {
         this.startLevel(this.progress.currentLevel);
       } else if (hit(this.buttons.levels, x, y)) {
         this.playSfx("click");
-        this.ensureLevelConfigs();
-        this.scene = "levels";
+        this.showToast("\u6b63\u5728\u52a0\u8f7d\u5173\u5361");
+        Promise.all([
+          this.ensureLevelConfigs(),
+          this.loadImagesOnce("levels", this.levelImageAssets())
+        ]).then(() => {
+          this.scene = "levels";
+        });
       } else if (hit(this.buttons.timeMode, x, y)) {
         this.playSfx("click");
         this.toast = {
@@ -1020,6 +1087,7 @@ class GameApp {
     const auth = this.progressStore.loadAuth();
     const session = auth && auth.token ? Promise.resolve() : (this.sessionPromise || this.syncSession());
     Promise.all([session, this.ensureLevelConfigs()])
+      .then(() => this.loadImagesOnce(`game:${levelId}`, this.gameImageAssets(levelId)))
       .then(() => this.apiClient.startLevel(levelId))
       .then((progress) => {
         if (progress) {
@@ -1228,7 +1296,15 @@ class GameApp {
       coinsEarned: result.coinsEarned,
       usedHints: result.usedHints
     })
-      .then((progress) => {
+      .then((data) => {
+        const progress = data && data.progress ? data.progress : data;
+        const rewards = data && data.rewards ? data.rewards : {};
+        if (rewards.stamina > 0) {
+          result.rewards = {
+            ...(result.rewards || {}),
+            stamina: rewards.stamina
+          };
+        }
         this.progress = progress;
         this.syncToolCountsFromProgress(progress);
       })

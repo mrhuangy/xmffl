@@ -653,7 +653,9 @@ class Renderer {
   loading(state) {
     const { width, height, progress } = state;
     const ctx = this.ctx;
-    drawImageCover(ctx, this.assets.image("gameBg"), 0, 0, width, height);
+    ctx.fillStyle = "#3f8f4f";
+    ctx.fillRect(0, 0, width, height);
+    drawImageCover(ctx, this.assets.image("loadingBg"), 0, 0, width, height);
     drawImageContain(ctx, this.assets.image("logo"), width * 0.065, height * 0.09, width * 0.88, height * 0.28);
 
     const loadingImage = this.assets.image("loading");
@@ -1341,6 +1343,9 @@ class Renderer {
         drawImageContain(ctx, image, x + panelW / 2 - 57 + index * 40, y + 74, size, size);
       }
       fillTextCenter(ctx, `\u5956\u52b1 ${result.coinsEarned} \u91d1\u5e01`, x, y + 132, panelW, 18, "#4f6f7d", "600");
+      if (result.rewards && result.rewards.stamina > 0) {
+        fillTextCenter(ctx, `\u9996\u6b213\u661f +${result.rewards.stamina}\u4f53\u529b`, x, y + 154, panelW, 17, "#2d9a58", "700");
+      }
     } else {
       fillTextCenter(ctx, this.reasonText(result.reason), x, y + 102, panelW, 18, "#4f6f7d", "600");
     }

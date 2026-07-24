@@ -33,7 +33,7 @@ WECHAT_MINIGAME_SECRET=
 在本机 hosts 文件增加：
 
 ```text
-127.0.0.1 fpxxl.local admin.fpxxl.local api.fpxxl.local minigame-api.fpxxl.local game-api.fpxxl.local
+127.0.0.1 fpxxl.local admin.fpxxl.local api.fpxxl.local minigame-api.fpxxl.local game-api.fpxxl.local assets.fpxxl.local
 ```
 
 Windows hosts 文件路径通常是：

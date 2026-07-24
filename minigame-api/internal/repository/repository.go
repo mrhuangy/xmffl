@@ -42,7 +42,7 @@ type Repository interface {
 	PublicSystemControls(ctx context.Context) (domain.PublicSystemControls, error)
 	SystemControlBool(ctx context.Context, key string, fallback bool) (bool, error)
 	StartLevel(ctx context.Context, playerID uint64, levelID int) (domain.PlayerProgress, error)
-	SubmitLevelResult(ctx context.Context, player domain.Player, result domain.LevelResult) (domain.PlayerProgress, error)
+	SubmitLevelResult(ctx context.Context, player domain.Player, result domain.LevelResult) (domain.PlayerProgress, domain.LevelResultRewards, error)
 	ListShopProducts(ctx context.Context) ([]domain.ShopProduct, error)
 	PurchaseProduct(ctx context.Context, playerID uint64, productKey string) (domain.PlayerProgress, string, error)
 	ListLeaderboard(ctx context.Context, levelID int, limit int) ([]domain.LeaderboardEntry, error)
@@ -403,21 +403,23 @@ func (r *MySQLRepository) StartLevel(ctx context.Context, playerID uint64, level
 	return progress, tx.Commit()
 }
 
-func (r *MySQLRepository) SubmitLevelResult(ctx context.Context, player domain.Player, result domain.LevelResult) (domain.PlayerProgress, error) {
+func (r *MySQLRepository) SubmitLevelResult(ctx context.Context, player domain.Player, result domain.LevelResult) (domain.PlayerProgress, domain.LevelResultRewards, error) {
+	var rewards domain.LevelResultRewards
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return domain.PlayerProgress{}, err
+		return domain.PlayerProgress{}, rewards, err
 	}
 	defer rollback(tx)
 
 	progress, err := progressForUpdate(ctx, tx, player.ID)
 	if err != nil {
-		return domain.PlayerProgress{}, err
+		return domain.PlayerProgress{}, rewards, err
 	}
 	level, err := levelByID(ctx, tx, result.LevelID)
 	if err != nil {
-		return domain.PlayerProgress{}, err
+		return domain.PlayerProgress{}, rewards, err
 	}
+	previousBestStars := progress.LevelStars[strconv.Itoa(result.LevelID)]
 	result.Success = result.Success && normalizeReason(result.Reason) == "completed"
 	if result.Success {
 		result.Stars = calculateResultStars(result, level)
@@ -434,7 +436,7 @@ func (r *MySQLRepository) SubmitLevelResult(ctx context.Context, player domain.P
 		result.ElapsedMs, result.Stars, result.CoinsEarned, result.UsedHints,
 	)
 	if err != nil {
-		return domain.PlayerProgress{}, err
+		return domain.PlayerProgress{}, rewards, err
 	}
 	levelResultID, _ := res.LastInsertId()
 
@@ -450,7 +452,7 @@ func (r *MySQLRepository) SubmitLevelResult(ctx context.Context, player domain.P
 				makeID("coin"), player.ID, result.CoinsEarned, progress.Coins, strconv.FormatInt(levelResultID, 10),
 			)
 			if err != nil {
-				return domain.PlayerProgress{}, err
+				return domain.PlayerProgress{}, rewards, err
 			}
 			_, err = tx.ExecContext(ctx, `INSERT INTO reward_grants (
 				reward_id, player_id, source, source_ref, reward_type, amount, level_id
@@ -458,37 +460,60 @@ func (r *MySQLRepository) SubmitLevelResult(ctx context.Context, player domain.P
 				makeID("reward"), player.ID, strconv.FormatInt(levelResultID, 10), result.CoinsEarned, result.LevelID,
 			)
 			if err != nil {
-				return domain.PlayerProgress{}, err
+				return domain.PlayerProgress{}, rewards, err
 			}
 		}
 
 		levelStarsJSON, err := json.Marshal(progress.LevelStars)
 		if err != nil {
-			return domain.PlayerProgress{}, err
+			return domain.PlayerProgress{}, rewards, err
 		}
 		completedJSON, err := json.Marshal(progress.CompletedLevels)
 		if err != nil {
-			return domain.PlayerProgress{}, err
+			return domain.PlayerProgress{}, rewards, err
+		}
+		if result.Stars == 3 && previousBestStars < 3 {
+			rewards.Stamina = 1
+			progress.Stamina += rewards.Stamina
+			if progress.Stamina >= progress.MaxStamina {
+				progress.NextStaminaRecoverAt = nil
+			}
+			_, err = tx.ExecContext(ctx, `INSERT INTO stamina_transactions (
+				transaction_no, player_id, change_amount, balance_after, reason, ref_type, ref_id, note
+			) VALUES (?, ?, ?, ?, 'activity_reward', 'level_result', ?, 'first_3_star')`,
+				makeID("stamina"), player.ID, rewards.Stamina, progress.Stamina, strconv.FormatInt(levelResultID, 10),
+			)
+			if err != nil {
+				return domain.PlayerProgress{}, rewards, err
+			}
+			_, err = tx.ExecContext(ctx, `INSERT INTO reward_grants (
+				reward_id, player_id, source, source_ref, reward_type, amount, level_id
+			) VALUES (?, ?, 'activity', ?, 'stamina', ?, ?)`,
+				makeID("reward"), player.ID, strconv.FormatInt(levelResultID, 10), rewards.Stamina, result.LevelID,
+			)
+			if err != nil {
+				return domain.PlayerProgress{}, rewards, err
+			}
 		}
 		_, err = tx.ExecContext(ctx, `UPDATE player_progress
-			SET current_level = ?, coins = ?, level_stars = ?, completed_levels = ?, updated_at = NOW()
-			WHERE player_id = ?`, progress.CurrentLevel, progress.Coins, string(levelStarsJSON), string(completedJSON), player.ID)
+			SET current_level = ?, coins = ?, stamina = ?, next_stamina_recover_at = ?, level_stars = ?, completed_levels = ?, updated_at = NOW()
+			WHERE player_id = ?`, progress.CurrentLevel, progress.Coins, progress.Stamina, nullableTime(progress.NextStaminaRecoverAt), string(levelStarsJSON), string(completedJSON), player.ID)
 		if err != nil {
-			return domain.PlayerProgress{}, err
+			return domain.PlayerProgress{}, rewards, err
 		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO leaderboard_entries (
 			player_id, level_id, nickname, stars, steps, elapsed_ms
 		) VALUES (?, ?, ?, ?, ?, ?)`, player.ID, result.LevelID, player.Nickname, result.Stars, result.Steps, result.ElapsedMs)
 		if err != nil {
-			return domain.PlayerProgress{}, err
+			return domain.PlayerProgress{}, rewards, err
 		}
 	}
 
 	progress, err = progressByPlayerID(ctx, tx, player.ID)
 	if err != nil {
-		return domain.PlayerProgress{}, err
+		return domain.PlayerProgress{}, rewards, err
 	}
-	return progress, tx.Commit()
+	return progress, rewards, tx.Commit()
 }
 
 func (r *MySQLRepository) ListShopProducts(ctx context.Context) ([]domain.ShopProduct, error) {

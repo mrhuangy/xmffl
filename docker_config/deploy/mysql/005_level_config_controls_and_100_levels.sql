@@ -96,10 +96,59 @@ PREPARE stmt FROM @add_stamina_cost;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
+SET @add_coin_reward_star1 = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = DATABASE()
+        AND table_name = 'level_configs'
+        AND column_name = 'coin_reward_star1'
+    ),
+    'ALTER TABLE level_configs ADD COLUMN coin_reward_star1 INT UNSIGNED NOT NULL DEFAULT 10 AFTER coin_reward_base',
+    'SELECT 1'
+  )
+);
+PREPARE stmt FROM @add_coin_reward_star1;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @add_coin_reward_star2 = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = DATABASE()
+        AND table_name = 'level_configs'
+        AND column_name = 'coin_reward_star2'
+    ),
+    'ALTER TABLE level_configs ADD COLUMN coin_reward_star2 INT UNSIGNED NOT NULL DEFAULT 20 AFTER coin_reward_star1',
+    'SELECT 1'
+  )
+);
+PREPARE stmt FROM @add_coin_reward_star2;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @add_coin_reward_star3 = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = DATABASE()
+        AND table_name = 'level_configs'
+        AND column_name = 'coin_reward_star3'
+    ),
+    'ALTER TABLE level_configs ADD COLUMN coin_reward_star3 INT UNSIGNED NOT NULL DEFAULT 30 AFTER coin_reward_star2',
+    'SELECT 1'
+  )
+);
+PREPARE stmt FROM @add_coin_reward_star3;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
 INSERT INTO level_configs (
   level_id, rows_count, cols_count, pair_count, mode, theme_id,
   initial_preview_ms, flip_back_delay_ms, level_time_limit_seconds, max_mismatch_count,
-  show_steps, show_timer, show_mismatch, hint_highlight_ms, coin_reward_base, stamina_cost,
+  show_steps, show_timer, show_mismatch, hint_highlight_ms, coin_reward_base,
+  coin_reward_star1, coin_reward_star2, coin_reward_star3, stamina_cost,
   excellent_step_threshold, normal_step_threshold, excellent_time_threshold, normal_time_threshold,
   time_limit_seconds, step_limit, enabled, version
 )
@@ -159,6 +208,9 @@ level_defaults AS (
     1 AS show_mismatch,
     1300 AS hint_highlight_ms,
     10 AS coin_reward_base,
+    10 AS coin_reward_star1,
+    20 AS coin_reward_star2,
+    30 AS coin_reward_star3,
     1 AS stamina_cost,
     CASE
       WHEN level_id = 1 THEN 3
@@ -197,7 +249,8 @@ level_defaults AS (
 SELECT
   level_id, rows_count, cols_count, pair_count, mode, theme_id,
   initial_preview_ms, flip_back_delay_ms, level_time_limit_seconds, max_mismatch_count,
-  show_steps, show_timer, show_mismatch, hint_highlight_ms, coin_reward_base, stamina_cost,
+  show_steps, show_timer, show_mismatch, hint_highlight_ms, coin_reward_base,
+  coin_reward_star1, coin_reward_star2, coin_reward_star3, stamina_cost,
   excellent_step_threshold, normal_step_threshold, excellent_time_threshold, normal_time_threshold,
   time_limit_seconds, step_limit, enabled, version
 FROM level_defaults
@@ -216,6 +269,9 @@ ON DUPLICATE KEY UPDATE
   show_mismatch = VALUES(show_mismatch),
   hint_highlight_ms = VALUES(hint_highlight_ms),
   coin_reward_base = VALUES(coin_reward_base),
+  coin_reward_star1 = VALUES(coin_reward_star1),
+  coin_reward_star2 = VALUES(coin_reward_star2),
+  coin_reward_star3 = VALUES(coin_reward_star3),
   stamina_cost = VALUES(stamina_cost),
   excellent_step_threshold = VALUES(excellent_step_threshold),
   normal_step_threshold = VALUES(normal_step_threshold),
@@ -232,4 +288,7 @@ ALTER TABLE level_configs
   MODIFY COLUMN show_mismatch TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'Show mismatch counter in level',
   MODIFY COLUMN hint_highlight_ms INT NOT NULL DEFAULT 1300 COMMENT 'Hint highlight duration in milliseconds',
   MODIFY COLUMN coin_reward_base INT NOT NULL DEFAULT 10 COMMENT 'Base coin reward per star',
+  MODIFY COLUMN coin_reward_star1 INT UNSIGNED NOT NULL DEFAULT 10 COMMENT '1 星通关金币奖励',
+  MODIFY COLUMN coin_reward_star2 INT UNSIGNED NOT NULL DEFAULT 20 COMMENT '2 星通关金币奖励',
+  MODIFY COLUMN coin_reward_star3 INT UNSIGNED NOT NULL DEFAULT 30 COMMENT '3 星通关金币奖励',
   MODIFY COLUMN stamina_cost INT NOT NULL DEFAULT 1 COMMENT 'Stamina cost to start level';

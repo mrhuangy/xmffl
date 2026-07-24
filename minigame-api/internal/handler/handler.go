@@ -127,12 +127,12 @@ func (h *Handler) SubmitLevelResult(c *gin.Context) {
 		badRequest(c, err.Error())
 		return
 	}
-	progress, err := h.gameService.SubmitLevelResult(c.Request.Context(), currentPlayer(c), result)
+	progress, rewards, err := h.gameService.SubmitLevelResult(c.Request.Context(), currentPlayer(c), result)
 	if err != nil {
 		handleKnownError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"progress": domain.NewClientProgress(progress)})
+	c.JSON(http.StatusCreated, gin.H{"progress": domain.NewClientProgress(progress), "rewards": rewards})
 }
 
 func (h *Handler) ChangeToolCount(c *gin.Context) {

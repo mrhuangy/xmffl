@@ -146,6 +146,10 @@ type LevelResult struct {
 	UsedHints     int    `json:"usedHints"`
 }
 
+type LevelResultRewards struct {
+	Stamina int `json:"stamina"`
+}
+
 type LeaderboardEntry struct {
 	OpenID      string    `json:"openId"`
 	Nickname    string    `json:"nickname"`

@@ -30,7 +30,9 @@
   },
   "simulatorPluginLibVersion": {},
   "packOptions": {
-    "ignore": [],
+    "ignore": [
+      
+    ],
     "include": []
   },
   "isGameTourist": false,

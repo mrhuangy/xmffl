@@ -1,4 +1,6 @@
-const API_BASE = "http://127.0.0.1:8090/api/v1";
+const API_BASE = "https://fpxxl-gameapi.gaintmonster.cn/api/v1";
+const REQUEST_TIMEOUT_MS = 30000;
+const REQUEST_RETRY_COUNT = 1;
 
 class ApiClient {
   constructor(progressStore) {
@@ -94,9 +96,15 @@ class ApiClient {
       }
     }).then((data) => {
       if (data && data.progress) {
-        return this.progressStore.saveRemote(data.progress);
+        return {
+          progress: this.progressStore.saveRemote(data.progress),
+          rewards: data.rewards || {}
+        };
       }
-      return this.progressStore.load();
+      return {
+        progress: this.progressStore.load(),
+        rewards: {}
+      };
     });
   }
 
@@ -176,11 +184,16 @@ function wxLogin() {
 }
 
 function request(options) {
+  return requestWithRetry(options, 0);
+}
+
+function requestWithRetry(options, attempt) {
   return new Promise((resolve, reject) => {
     wx.request({
       url: options.url,
       method: options.method || "GET",
       data: options.data,
+      timeout: REQUEST_TIMEOUT_MS,
       header: {
         "Content-Type": "application/json",
         ...(options.header || {})
@@ -193,9 +206,22 @@ function request(options) {
         const message = res.data && res.data.error ? res.data.error : `HTTP ${res.statusCode}`;
         reject(new Error(message));
       },
-      fail: reject
+      fail: (error) => {
+        if (shouldRetry(error) && attempt < REQUEST_RETRY_COUNT) {
+          setTimeout(() => {
+            requestWithRetry(options, attempt + 1).then(resolve).catch(reject);
+          }, 800);
+          return;
+        }
+        reject(error);
+      }
     });
   });
+}
+
+function shouldRetry(error) {
+  const message = error && error.errMsg ? error.errMsg : "";
+  return message.includes("timeout") || message.includes("fail");
 }
 
 module.exports = {

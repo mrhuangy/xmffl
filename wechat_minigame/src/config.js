@@ -1,4 +1,5 @@
-const ASSET_ROOT = "assets";
+const ASSET_ROOT = "https://fpxxl-images.gaintmonster.cn";
+const ANIMAL_ASSET_ROOT = `${ASSET_ROOT}/animals`;
 
 const levelConfigs = Array.from({ length: 100 }, (_, index) => {
   const levelId = index + 1;
@@ -103,13 +104,14 @@ const animalIcons = [
 ];
 
 const imageAssets = {
-  gameBg: `${ASSET_ROOT}/backgrounds/game-bg.png`,
-  logo: `${ASSET_ROOT}/ui/logo.png`,
-  loading: `${ASSET_ROOT}/ui/loading.png`,
-  homeBg: `${ASSET_ROOT}/backgrounds/home-bg.png`,
-  startButton: `${ASSET_ROOT}/ui/game-start.png`,
-  selectButton: `${ASSET_ROOT}/ui/select-button.png`,
-  timeModeButton: `${ASSET_ROOT}/ui/unlessmodel-button.png`,
+  gameBg: `assets/backgrounds/game-bg.jpg`,
+  loadingBg: "assets/backgrounds/game-bg.jpg",
+  logo: `assets/ui/logo.png`,
+  loading: "assets/ui/loading.png",
+  homeBg: `assets/backgrounds/home-bg.jpg`,
+  startButton: "assets/ui/game-start.png",
+  selectButton: `assets/ui/select-button.png`,
+  timeModeButton: `assets/ui/unlessmodel-button.png`,
   toolBulb: `${ASSET_ROOT}/ui/tool-bulb.png`,
   toolMagnifier: `${ASSET_ROOT}/ui/tool-magnifier.png`,
   toolEraser: `${ASSET_ROOT}/ui/tool-eraser.png`,
@@ -125,7 +127,7 @@ const imageAssets = {
 };
 
 for (const icon of animalIcons) {
-  imageAssets[`animal:${icon}`] = `${ASSET_ROOT}/animals/${icon}.png`;
+  imageAssets[`animal:${icon}`] = `${ANIMAL_ASSET_ROOT}/${icon}.png`;
 }
 
 const audioAssets = {
@@ -138,6 +140,7 @@ const audioAssets = {
 
 module.exports = {
   ASSET_ROOT,
+  ANIMAL_ASSET_ROOT,
   levelConfigs,
   animalIcons,
   imageAssets,
