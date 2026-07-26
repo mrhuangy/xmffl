@@ -118,6 +118,32 @@ class RewardService {
     };
   }
 
+  exchangeCoinsForTool(toolType) {
+    if (this.apiClient && this.apiClient.purchaseToolCount) {
+      return this.apiClient.purchaseToolCount(toolType).then((progress) => ({
+        success: true,
+        progress,
+        toastText: "\u6b21\u6570+1",
+        toolType
+      })).catch((error) => {
+        const message = error && error.message ? error.message : "";
+        return {
+          success: false,
+          progress: this.loadProgress(),
+          toastText: message.includes("insufficient coins") ? "\u91d1\u5e01\u4e0d\u8db3" : "\u5151\u6362\u5931\u8d25",
+          toolType
+        };
+      });
+    }
+
+    return Promise.resolve({
+      success: false,
+      progress: this.loadProgress(),
+      toastText: "\u5151\u6362\u5931\u8d25",
+      toolType
+    });
+  }
+
   staminaProductKey(cost, amount) {
     if (amount === 1 && cost === 99) {
       return "stamina_1_by_coins";

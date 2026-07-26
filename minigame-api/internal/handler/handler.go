@@ -162,6 +162,34 @@ func (h *Handler) ChangeToolCount(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"progress": domain.NewClientProgress(progress)})
 }
 
+func (h *Handler) PurchaseToolCount(c *gin.Context) {
+	var req struct {
+		ToolType string `json:"toolType" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		badRequest(c, err.Error())
+		return
+	}
+
+	progress, err := h.repo.PurchaseToolCount(c.Request.Context(), currentPlayer(c).ID, normalizeToolType(req.ToolType), 300, 1)
+	if err != nil {
+		handleKnownError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"progress": domain.NewClientProgress(progress)})
+}
+
+func normalizeToolType(toolType string) string {
+	switch toolType {
+	case "previewAgain":
+		return "preview_again"
+	case "removePair":
+		return "remove_pair"
+	default:
+		return toolType
+	}
+}
+
 func (h *Handler) ShopProducts(c *gin.Context) {
 	products, err := h.shopService.Products(c.Request.Context())
 	if err != nil {

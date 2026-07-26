@@ -37,6 +37,7 @@ type Repository interface {
 	PlayerByOpenID(ctx context.Context, openID string) (domain.Player, error)
 	Progress(ctx context.Context, playerID uint64) (domain.PlayerProgress, error)
 	ChangeToolCount(ctx context.Context, playerID uint64, toolType string, delta int, source string) (domain.PlayerProgress, error)
+	PurchaseToolCount(ctx context.Context, playerID uint64, toolType string, cost int, amount int) (domain.PlayerProgress, error)
 	ListLevels(ctx context.Context) ([]domain.LevelConfig, error)
 	AdConfig(ctx context.Context) (domain.AdFrequencyConfig, error)
 	PublicSystemControls(ctx context.Context) (domain.PublicSystemControls, error)
@@ -230,6 +231,74 @@ func (r *MySQLRepository) ChangeToolCount(ctx context.Context, playerID uint64, 
 	}
 
 	_, err = tx.ExecContext(ctx, `UPDATE player_progress SET `+toolColumn+` = ?, updated_at = NOW() WHERE player_id = ?`, balanceAfter, playerID)
+	if err != nil {
+		return domain.PlayerProgress{}, err
+	}
+
+	progress, err = progressByPlayerID(ctx, tx, playerID)
+	if err != nil {
+		return domain.PlayerProgress{}, err
+	}
+	return progress, tx.Commit()
+}
+
+func (r *MySQLRepository) PurchaseToolCount(ctx context.Context, playerID uint64, toolType string, cost int, amount int) (domain.PlayerProgress, error) {
+	if cost <= 0 || amount <= 0 {
+		return domain.PlayerProgress{}, ErrProductUnavailable
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.PlayerProgress{}, err
+	}
+	defer rollback(tx)
+
+	progress, err := progressForUpdate(ctx, tx, playerID)
+	if err != nil {
+		return domain.PlayerProgress{}, err
+	}
+	if progress.Coins < cost {
+		return domain.PlayerProgress{}, ErrInsufficientCoin
+	}
+
+	balanceAfter := 0
+	var toolColumn string
+	switch toolType {
+	case "hint":
+		balanceAfter = progress.Hints + amount
+		toolColumn = "hints"
+	case "preview_again":
+		balanceAfter = progress.PreviewAgainCount + amount
+		toolColumn = "preview_again_count"
+	case "remove_pair":
+		balanceAfter = progress.RemovePairCount + amount
+		toolColumn = "remove_pair_count"
+	default:
+		return domain.PlayerProgress{}, ErrNotFound
+	}
+
+	progress.Coins -= cost
+	_, err = tx.ExecContext(ctx, `INSERT INTO coin_transactions (
+		transaction_no, player_id, change_amount, balance_after, reason, ref_type, ref_id
+	) VALUES (?, ?, ?, ?, 'shop_purchase', 'tool_purchase', ?)`,
+		makeID("coin"), playerID, -cost, progress.Coins, toolType,
+	)
+	if err != nil {
+		return domain.PlayerProgress{}, err
+	}
+
+	_, err = tx.ExecContext(ctx, `INSERT INTO tool_transactions (
+		transaction_no, player_id, tool_type, change_amount, balance_after, source, ref_type, ref_id, note
+	) VALUES (?, ?, ?, ?, ?, 'shop_purchase', 'coin_exchange', ?, ?)`,
+		makeID("tool"), playerID, toolType, amount, balanceAfter, toolType, "300 coins for 1 tool charge",
+	)
+	if err != nil {
+		return domain.PlayerProgress{}, err
+	}
+
+	_, err = tx.ExecContext(ctx, `UPDATE player_progress SET coins = ?, `+toolColumn+` = ?, updated_at = NOW() WHERE player_id = ?`,
+		progress.Coins, balanceAfter, playerID,
+	)
 	if err != nil {
 		return domain.PlayerProgress{}, err
 	}

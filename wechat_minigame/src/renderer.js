@@ -301,7 +301,7 @@ class Renderer {
     ctx.fillRect(0, 0, width, height);
 
     const panelW = Math.min(width * 0.78, 320);
-    const panelH = 188;
+    const panelH = 206;
     const x = (width - panelW) / 2;
     const y = height * 0.31;
     ctx.fillStyle = "#fff9df";
@@ -886,6 +886,7 @@ class Renderer {
       removedAnimations,
       gamePaused,
       toolAdDialog,
+      progress,
       settings
     } = state;
     const ctx = this.ctx;
@@ -917,7 +918,7 @@ class Renderer {
 
     if (gamePaused) {
       if (toolAdDialog) {
-        this.toolAdDialog(width, height, buttons, toolAdDialog);
+        this.toolAdDialog(width, height, buttons, toolAdDialog, progress);
       } else {
         this.pauseMenu(width, height, buttons, settings);
       }
@@ -955,16 +956,16 @@ class Renderer {
     ctx.restore();
   }
 
-  toolAdDialog(width, height, buttons, dialog) {
+  toolAdDialog(width, height, buttons, dialog, progress) {
     const ctx = this.ctx;
     ctx.save();
     ctx.fillStyle = "rgba(0, 0, 0, 0.38)";
     ctx.fillRect(0, 0, width, height);
 
-    const panelW = Math.min(width * 0.78, 320);
-    const panelH = 188;
+    const panelW = Math.min(width * 0.76, 320);
+    const panelH = 248;
     const x = (width - panelW) / 2;
-    const y = height * 0.31;
+    const y = buttons.toolAdConfirm.y - 98;
     ctx.fillStyle = "#fff9df";
     roundRect(ctx, x, y, panelW, panelH, 18);
     ctx.fill();
@@ -972,11 +973,16 @@ class Renderer {
     ctx.lineWidth = 4;
     ctx.stroke();
 
-    strokeTextCenter(ctx, "\u6b21\u6570\u5df2\u7528\u5b8c", x, y + 36, panelW, 23, "#ffffff", "#8f4f17", 4, "900");
-    fillTextCenter(ctx, `${dialog.label}\u6b21\u6570\u5df2\u7528\u5b8c`, x, y + 78, panelW, 16, "#7b3f17", "900");
-    fillTextCenter(ctx, "\u89c2\u770b\u5e7f\u544a\u53ef\u589e\u52a01\u6b21", x, y + 104, panelW, 15, "#7b3f17", "800");
-    this.dialogButton(buttons.toolAdCancel, "\u5173\u95ed", "#d5d0c4", "#8a8275");
-    this.dialogButton(buttons.toolAdConfirm, "\u770b\u5e7f\u544a", "#f5b43c", "#b96a09");
+    strokeTextCenter(ctx, "\u8d2d\u4e70\u6b21\u6570", x, y + 34, panelW, 22, "#ffffff", "#9a511a", 4, "900");
+    const coins = Number((progress && progress.coins) || 0);
+    const coinText = Number.isFinite(coins) ? coins : 0;
+    fillTextCenter(ctx, `\u5f53\u524d\u91d1\u5e01\uff1a${coinText}`, x, y + 62, panelW, 14, "#8f4f17", "900");
+    const message = dialog.successText || dialog.errorText || dialog.statusText || `${dialog.label}\u6b21\u6570\u5df2\u7528\u5b8c`;
+    const messageColor = dialog.successText ? "#2d8a4d" : (dialog.errorText ? "#d13d25" : "#9a5a1e");
+    fillTextCenter(ctx, message, x, y + 82, panelW, 13, messageColor, "900");
+    this.shopRow(buttons.toolAdConfirm, "\u89c2\u770b\u5e7f\u544a", "\u83b7\u5f971\u6b21", "#78d64b", "#4ba733");
+    this.shopRow(buttons.toolCoinConfirm, "300\u91d1\u5e01", "\u83b7\u5f971\u6b21", "#f5b43c", "#b96a09");
+    this.dialogButton(buttons.toolAdClose, "\u5173\u95ed", "#d5d0c4", "#8a8275");
     ctx.restore();
   }
 
@@ -1328,7 +1334,7 @@ class Renderer {
     ctx.fillRect(0, 0, width, height);
 
     const panelW = width * 0.78;
-    const panelH = 260;
+    const panelH = 282;
     const x = (width - panelW) / 2;
     const y = height * 0.28;
     ctx.fillStyle = "#ffffff";
@@ -1342,14 +1348,26 @@ class Renderer {
         const image = index < result.stars ? this.assets.image("winStar") : this.assets.image("lossStar");
         drawImageContain(ctx, image, x + panelW / 2 - 57 + index * 40, y + 74, size, size);
       }
-      fillTextCenter(ctx, `\u5956\u52b1 ${result.coinsEarned} \u91d1\u5e01`, x, y + 132, panelW, 18, "#4f6f7d", "600");
+      fillTextCenter(ctx, `\u5956\u52b1 ${result.coinsEarned} \u91d1\u5e01`, x, y + 130, panelW, 18, "#4f6f7d", "600");
       if (result.rewards && result.rewards.stamina > 0) {
-        fillTextCenter(ctx, `\u9996\u6b213\u661f +${result.rewards.stamina}\u4f53\u529b`, x, y + 154, panelW, 17, "#2d9a58", "700");
+        const rewardW = Math.min(panelW * 0.58, 188);
+        const rewardH = 24;
+        const rewardX = x + (panelW - rewardW) / 2;
+        const rewardY = y + 144;
+        ctx.save();
+        ctx.fillStyle = "#e8f7de";
+        roundRect(ctx, rewardX, rewardY, rewardW, rewardH, 12);
+        ctx.fill();
+        ctx.strokeStyle = "#8fca62";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.restore();
+        fillTextCenter(ctx, `\u9996\u6b213\u661f +${result.rewards.stamina}\u4f53\u529b`, rewardX, rewardY + rewardH / 2, rewardW, 15, "#2d8a4d", "800");
       }
     } else {
       fillTextCenter(ctx, this.reasonText(result.reason), x, y + 102, panelW, 18, "#4f6f7d", "600");
     }
-    fillTextCenter(ctx, `\u7528\u65f6 ${Math.ceil(result.elapsedMs / 1000)}s  \u6b65\u6570 ${result.steps}`, x, y + 166, panelW, 17, "#4f6f7d", "600");
+    fillTextCenter(ctx, `\u7528\u65f6 ${Math.ceil(result.elapsedMs / 1000)}s  \u6b65\u6570 ${result.steps}`, x, y + (result.success ? 186 : 166), panelW, 17, "#4f6f7d", "600");
     this.drawButton(buttons.retry, "\u91cd\u73a9", "#f7b84b");
     this.drawButton(buttons.exit, "\u9000\u51fa", "#d5d0c4");
     this.drawButton(buttons.next, result.success ? "\u4e0b\u4e00\u5173" : "\u9009\u5173", "#76d6bd");

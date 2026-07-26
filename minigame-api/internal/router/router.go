@@ -32,6 +32,7 @@ func New(cfg config.Config, repo repository.Repository, h *handler.Handler) http
 	authed.POST("/levels/start", h.StartLevel)
 	authed.POST("/levels/results", h.SubmitLevelResult)
 	authed.POST("/tools/change", h.ChangeToolCount)
+	authed.POST("/tools/purchase", h.PurchaseToolCount)
 	authed.GET("/shop/products", h.ShopProducts)
 	authed.POST("/shop/purchase", h.Purchase)
 	authed.POST("/events/batch", h.Events)

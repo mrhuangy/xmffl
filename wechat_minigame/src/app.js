@@ -146,6 +146,21 @@ class GameApp {
     return assets;
   }
 
+  showLevelsScene() {
+    this.showToast("\u6b63\u5728\u52a0\u8f7d\u5173\u5361");
+    return Promise.all([
+      this.ensureLevelConfigs(),
+      this.loadImagesOnce("levels", this.levelImageAssets())
+    ]).then(() => {
+      this.scene = "levels";
+    }).catch((error) => {
+      this.showToast("\u5173\u5361\u8d44\u6e90\u52a0\u8f7d\u5931\u8d25");
+      if (typeof console !== "undefined" && console.warn) {
+        console.warn("show levels failed", error);
+      }
+    });
+  }
+
   syncSession() {
     this.sessionPromise = this.apiClient.login()
       .then((data) => {
@@ -601,6 +616,13 @@ class GameApp {
     const pausePanelX = (this.width - pausePanelW) / 2;
     const pausePanelY = this.height * 0.27;
     const pauseCloseSize = 30;
+    const toolPanelW = Math.min(this.width * 0.78, 320);
+    const toolPanelX = (this.width - toolPanelW) / 2;
+    const toolPanelY = this.height * 0.31;
+    const toolRowW = toolPanelW - 48;
+    const toolRowX = toolPanelX + 24;
+    const toolRowH = 38;
+    const toolRowGap = 10;
     this.buttons = {
       back: { x: 24, y: Math.max(24, this.height * 0.04), w: topButtonSize, h: topButtonSize },
       hint: { x: this.width * 0.2, y: toolY, w: this.width * 0.18, h: 58 },
@@ -611,11 +633,12 @@ class GameApp {
       pauseRetry: { x: this.width * 0.24, y: this.height * 0.495, w: this.width * 0.22, h: 38 },
       pauseHome: { x: this.width * 0.54, y: this.height * 0.495, w: this.width * 0.22, h: 38 },
       pauseClose: { x: pausePanelX + pausePanelW - pauseCloseSize - 10, y: pausePanelY + 10, w: pauseCloseSize, h: pauseCloseSize },
-      toolAdCancel: { x: this.width * 0.24, y: this.height * 0.52, w: this.width * 0.24, h: 38 },
-      toolAdConfirm: { x: this.width * 0.52, y: this.height * 0.52, w: this.width * 0.24, h: 38 },
-      retry: { x: this.width * 0.13, y: this.height * 0.28 + 208, w: this.width * 0.22, h: 42 },
-      exit: { x: this.width * 0.39, y: this.height * 0.28 + 208, w: this.width * 0.22, h: 42 },
-      next: { x: this.width * 0.65, y: this.height * 0.28 + 208, w: this.width * 0.22, h: 42 }
+      toolAdConfirm: { x: toolRowX, y: toolPanelY + 98, w: toolRowW, h: toolRowH },
+      toolCoinConfirm: { x: toolRowX, y: toolPanelY + 98 + toolRowH + toolRowGap, w: toolRowW, h: toolRowH },
+      toolAdClose: { x: this.width * 0.34, y: toolPanelY + 98 + (toolRowH + toolRowGap) * 2 + 8, w: this.width * 0.32, h: 36 },
+      retry: { x: this.width * 0.13, y: this.height * 0.28 + 226, w: this.width * 0.22, h: 42 },
+      exit: { x: this.width * 0.39, y: this.height * 0.28 + 226, w: this.width * 0.22, h: 42 },
+      next: { x: this.width * 0.65, y: this.height * 0.28 + 226, w: this.width * 0.22, h: 42 }
     };
 
     const level = this.game.level;
@@ -682,13 +705,7 @@ class GameApp {
         this.startLevel(this.progress.currentLevel);
       } else if (hit(this.buttons.levels, x, y)) {
         this.playSfx("click");
-        this.showToast("\u6b63\u5728\u52a0\u8f7d\u5173\u5361");
-        Promise.all([
-          this.ensureLevelConfigs(),
-          this.loadImagesOnce("levels", this.levelImageAssets())
-        ]).then(() => {
-          this.scene = "levels";
-        });
+        this.showLevelsScene();
       } else if (hit(this.buttons.timeMode, x, y)) {
         this.playSfx("click");
         this.toast = {
@@ -880,14 +897,42 @@ class GameApp {
   openToolAdDialog(type, label) {
     this.playSfx("wrong");
     this.pauseGame();
-    this.toolAdDialog = { type, label };
+    this.toolAdDialog = { type, label, statusText: "", errorText: "", successText: "" };
   }
 
   handleToolAdDialogTouch(x, y) {
-    if (hit(this.buttons.toolAdCancel, x, y)) {
+    if (this.toolAdDialog && (this.toolAdDialog.status === "pending" || this.toolAdDialog.status === "success")) {
+      return;
+    }
+
+    if (hit(this.buttons.toolAdClose, x, y)) {
       this.playSfx("click");
       this.toolAdDialog = null;
       this.resumeGame();
+      return;
+    }
+
+    if (hit(this.buttons.toolCoinConfirm, x, y)) {
+      this.playSfx("click");
+      const type = this.toolAdDialog.type;
+      if ((this.progress.coins || 0) < 300) {
+        this.playSfx("wrong");
+        this.toolAdDialog = {
+          ...this.toolAdDialog,
+          statusText: "",
+          successText: "",
+          errorText: "\u91d1\u5e01\u4e0d\u8db3"
+        };
+        return;
+      }
+      this.toolAdDialog = {
+        ...this.toolAdDialog,
+        status: "pending",
+        statusText: "\u6b63\u5728\u5151\u6362...",
+        errorText: "",
+        successText: ""
+      };
+      this.exchangeCoinsForTool(type);
       return;
     }
 
@@ -897,6 +942,50 @@ class GameApp {
       this.toolAdDialog = null;
       this.showToolRewardAd(type);
     }
+  }
+
+  exchangeCoinsForTool(type) {
+    Promise.resolve(this.rewardService.exchangeCoinsForTool(type)).then((result) => {
+      if (result && result.progress) {
+        this.progress = result.progress;
+        this.syncToolCountsFromProgress(result.progress);
+      }
+      if (result && result.success) {
+        this.toolAdDialog = {
+          ...(this.toolAdDialog || { type }),
+          status: "success",
+          statusText: "",
+          errorText: "",
+          successText: "\u5151\u6362\u6210\u529f\uff0c\u6b21\u6570+1"
+        };
+        setTimeout(() => {
+          if (this.toolAdDialog && this.toolAdDialog.status === "success") {
+            this.toolAdDialog = null;
+            this.resumeGame();
+          }
+        }, 800);
+        return;
+      }
+      this.toolAdDialog = {
+        ...(this.toolAdDialog || { type }),
+        status: "",
+        statusText: "",
+        successText: "",
+        errorText: (result && result.toastText) || "\u5151\u6362\u5931\u8d25"
+      };
+    }).catch((error) => {
+      const message = error && error.message ? error.message : "";
+      this.toolAdDialog = {
+        ...(this.toolAdDialog || { type }),
+        status: "",
+        statusText: "",
+        successText: "",
+        errorText: message.includes("insufficient coins") ? "\u91d1\u5e01\u4e0d\u8db3" : "\u5151\u6362\u5931\u8d25"
+      };
+      if (typeof console !== "undefined" && console.warn) {
+        console.warn("exchange tool failed", error);
+      }
+    });
   }
 
   showToolRewardAd(type) {
@@ -932,9 +1021,9 @@ class GameApp {
 
     if (hit(this.buttons.exit, x, y)) {
       this.playSfx("click");
-      this.scene = "levels";
       this.assets.stopBgm("gameBgm");
       this.playBgm("allBgm");
+      this.showLevelsScene();
       return;
     }
 
@@ -943,9 +1032,9 @@ class GameApp {
       if (this.game.lastResult && this.game.lastResult.success) {
         this.startLevel(Math.min(this.game.level.levelId + 1, this.levelConfigs.length));
       } else {
-        this.scene = "levels";
         this.assets.stopBgm("gameBgm");
         this.playBgm("allBgm");
+        this.showLevelsScene();
       }
     }
   }

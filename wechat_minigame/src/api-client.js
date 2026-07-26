@@ -1,4 +1,5 @@
-const API_BASE = "https://fpxxl-gameapi.gaintmonster.cn/api/v1";
+// const API_BASE = "https://fpxxl-gameapi.gaintmonster.cn/api/v1";
+const API_BASE = "http://127.0.0.1:8090/api/v1";
 const REQUEST_TIMEOUT_MS = 30000;
 const REQUEST_RETRY_COUNT = 1;
 
@@ -119,6 +120,28 @@ class ApiClient {
       data: {
         toolType: normalizeToolType(toolType),
         delta
+      },
+      header: {
+        Authorization: `Bearer ${auth.token}`
+      }
+    }).then((data) => {
+      if (data && data.progress) {
+        return this.progressStore.saveRemote(data.progress);
+      }
+      return this.progressStore.load();
+    });
+  }
+
+  purchaseToolCount(toolType) {
+    const auth = this.progressStore.loadAuth();
+    if (!auth || !auth.token) {
+      return Promise.reject(new Error("missing auth token"));
+    }
+    return request({
+      url: `${API_BASE}/tools/purchase`,
+      method: "POST",
+      data: {
+        toolType: normalizeToolType(toolType)
       },
       header: {
         Authorization: `Bearer ${auth.token}`

@@ -295,7 +295,7 @@ CREATE TABLE IF NOT EXISTS tool_transactions (
   tool_type ENUM('hint', 'preview_again', 'remove_pair') NOT NULL,
   change_amount INT NOT NULL,
   balance_after INT NOT NULL,
-  source ENUM('register', 'use', 'ad_reward', 'admin_adjust') NOT NULL,
+  source ENUM('register', 'use', 'ad_reward', 'shop_purchase', 'admin_adjust') NOT NULL,
   ref_type VARCHAR(64) NOT NULL DEFAULT '',
   ref_id VARCHAR(128) NOT NULL DEFAULT '',
   note VARCHAR(255) NOT NULL DEFAULT '',
