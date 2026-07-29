@@ -89,7 +89,9 @@ class PlayerRegistrationServiceTest extends TestCase
 
         [$player, $progress] = $service->upsert('openid-1', 'union-1', 'avatar-1');
 
-        $this->assertMatchesRegularExpression('/^.{3}$/u', $player->nickname);
+        $length = mb_strlen($player->nickname);
+        $this->assertGreaterThanOrEqual(4, $length);
+        $this->assertLessThanOrEqual(6, $length);
         $this->assertSame(100, $progress->coins);
         $this->assertSame(3, $progress->hints);
         $this->assertSame(3, $progress->preview_again_count);

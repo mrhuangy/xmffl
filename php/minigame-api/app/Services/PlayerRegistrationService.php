@@ -64,19 +64,28 @@ class PlayerRegistrationService
 
     private function uniqueNickname(): string
     {
-        $surnames = ['赵', '钱', '孙', '李', '周', '吴', '郑', '王', '冯', '陈', '褚', '卫', '蒋', '沈', '韩', '杨', '朱', '秦', '尤', '许', '何', '吕', '施', '张', '孔', '曹', '严', '华', '金', '魏', '陶', '姜', '戚', '谢', '邹', '喻', '柏', '水', '窦', '章', '云', '苏', '潘', '葛', '奚', '范', '彭', '郎', '鲁', '韦'];
-        $given = ['安', '柏', '辰', '澄', '川', '岚', '宁', '清', '然', '若', '书', '思', '望', '微', '溪', '晓', '言', '一', '予', '知', '舟', '景', '星', '月', '云', '禾', '秋', '南', '北', '青', '夏', '冬', '明', '远', '初', '白', '锦', '乐', '可', '宜'];
+        $prefixes = [
+            '星夜', '云端', '闪电', '极光', '月影', '焰火', '霜雪', '幻梦',
+            '银河', '青空', '暮光', '晨曦', '深海', '森林', '琥珀', '像素',
+            '泡泡', '彩虹', '甜梦', '流星',
+        ];
+        $characters = [
+            '团子', '松果', '布丁', '星尘', '旅人', '骑士', '精灵', '船长',
+            '猎手', '守卫', '术士', '游侠', '鲸歌', '萤火', '喵球', '果冻',
+            '蘑菇', '云朵', '雪球', '飞鱼',
+        ];
+        $titles = ['', '', '', '王', '酱', '侠', '号', '大王', '队长', '达人'];
 
         for ($attempt = 0; $attempt < 80; $attempt++) {
-            $nickname = $surnames[array_rand($surnames)]
-                .$given[array_rand($given)]
-                .$given[array_rand($given)];
+            $nickname = $prefixes[array_rand($prefixes)]
+                .$characters[array_rand($characters)]
+                .$titles[array_rand($titles)];
             if (! DB::table('players')->where('nickname', $nickname)->exists()) {
                 return $nickname;
             }
         }
 
-        return '玩家'.now()->format('ymdHis').random_int(100, 999);
+        return '星际'.strtoupper(substr(base_convert((string) hrtime(true), 10, 36), -4));
     }
 
     private function createProgress(object $player): void
