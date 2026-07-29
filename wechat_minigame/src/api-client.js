@@ -1,5 +1,6 @@
-const API_BASE = "https://fpxxl-gameapi.gaintmonster.cn/api/v1";
+// const API_BASE = "https://fpxxl-gameapi.gaintmonster.cn/api/v1";
 // const API_BASE = "http://127.0.0.1:8090/api/v1";
+const API_BASE = "http://minigame-api.fpxxl.local/api/v1";
 const REQUEST_TIMEOUT_MS = 30000;
 const REQUEST_RETRY_COUNT = 1;
 

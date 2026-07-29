@@ -1,0 +1,73 @@
+name: fpxxl-php-prod
+
+services:
+  admin_php:
+    build: {context: ./php, dockerfile: Dockerfile}
+    restart: unless-stopped
+    ports:
+      - "${ADMIN_PHP_FPM_HOST_PORT:-127.0.0.1:9003}:9000"
+    volumes:
+      - ../admin-api:/var/www/admin-api
+      - ./php/php.ini:/usr/local/etc/php/conf.d/custom.ini:ro
+      - ./php/www.conf:/usr/local/etc/php-fpm.d/www.conf:ro
+    working_dir: /var/www/admin-api
+    environment: &api_env
+      APP_ENV: ${APP_ENV:-production}
+      APP_DEBUG: ${APP_DEBUG:-false}
+      APP_NAME: FPXXL Admin API
+      APP_URL: ${ADMIN_APP_URL:-${APP_URL:-}}
+      APP_LOCALE: zh_CN
+      APP_TIMEZONE: Asia/Tokyo
+      APP_KEY: ${ADMIN_APP_KEY:-${APP_KEY:-}}
+      DB_CONNECTION: mysql
+      DB_HOST: ${DB_HOST:-fpxxl}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_DATABASE: ${DB_DATABASE:-fpxxl}
+      DB_USERNAME: ${DB_USERNAME:-fpxxl}
+      DB_PASSWORD: ${DB_PASSWORD:-fpxxl}
+      JWT_SECRET: ${JWT_SECRET:-change-me}
+      ALLOW_ORIGIN: ${FPXXL_ALLOW_ORIGIN:-*}
+      LOG_CHANNEL: stderr
+      CACHE_STORE: redis
+      SESSION_DRIVER: array
+      QUEUE_CONNECTION: sync
+      REDIS_HOST: redis
+    depends_on: [redis]
+    healthcheck: &php_healthcheck
+      test: ["CMD", "php", "-r", "$$s = @fsockopen('127.0.0.1', 9000); exit($$s ? 0 : 1);"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+      start_period: 5s
+    networks: [fpxxl]
+
+  minigame_php:
+    build: {context: ./php, dockerfile: Dockerfile}
+    restart: unless-stopped
+    ports:
+      - "${MINIGAME_PHP_FPM_HOST_PORT:-127.0.0.1:9004}:9000"
+    volumes:
+      - ../minigame-api:/var/www/minigame-api
+      - ./php/php.ini:/usr/local/etc/php/conf.d/custom.ini:ro
+      - ./php/www.conf:/usr/local/etc/php-fpm.d/www.conf:ro
+    working_dir: /var/www/minigame-api
+    environment:
+      <<: *api_env
+      APP_NAME: FPXXL Minigame API
+      APP_URL: ${MINIGAME_APP_URL:-${APP_URL:-}}
+      APP_KEY: ${MINIGAME_APP_KEY:-${APP_KEY:-}}
+      WECHAT_APP_ID: ${FPXXL_WECHAT_APP_ID:-${WECHAT_APP_ID:-}}
+      WECHAT_APP_SECRET: ${FPXXL_WECHAT_APP_SECRET:-${WECHAT_APP_SECRET:-}}
+    depends_on: [redis]
+    healthcheck: *php_healthcheck
+    networks: [fpxxl]
+
+  redis:
+    image: redis:7.2-alpine
+    restart: unless-stopped
+    volumes: ["redis_data:/data", "./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro"]
+    command: redis-server /usr/local/etc/redis/redis.conf
+    networks: [fpxxl]
+
+networks: {fpxxl: {driver: bridge}}
+volumes: {redis_data: {}}

@@ -1,0 +1,98 @@
+name: fpxxl-php
+
+services:
+  nginx:
+    image: nginx:1.25-alpine
+    ports: ["80:80"]
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ../admin-api:/var/www/admin-api:ro
+      - ../minigame-api:/var/www/minigame-api:ro
+      - ../../admin/dist:/var/www/admin:ro
+      - ./nginx/logs:/var/log/nginx
+    depends_on:
+      admin_php: {condition: service_healthy}
+      minigame_php: {condition: service_healthy}
+    networks: [fpxxl]
+
+  admin_php:
+    build: {context: ./php, dockerfile: Dockerfile}
+    volumes:
+      - ../admin-api:/var/www/admin-api
+      - ./php/php.ini:/usr/local/etc/php/conf.d/custom.ini:ro
+      - ./php/www.conf:/usr/local/etc/php-fpm.d/www.conf:ro
+    working_dir: /var/www/admin-api
+    environment: &api_env
+      APP_ENV: ${APP_ENV:-local}
+      APP_DEBUG: ${APP_DEBUG:-true}
+      APP_NAME: FPXXL Admin API
+      APP_URL: http://admin.fpxxl.local
+      APP_LOCALE: zh_CN
+      APP_TIMEZONE: Asia/Tokyo
+      APP_KEY: ${ADMIN_APP_KEY:-base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
+      DB_CONNECTION: mysql
+      DB_HOST: ${DB_HOST:-fpxxl}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_DATABASE: ${DB_DATABASE:-fpxxl}
+      DB_USERNAME: ${DB_USERNAME:-fpxxl}
+      DB_PASSWORD: ${DB_PASSWORD:-fpxxl}
+      JWT_SECRET: ${JWT_SECRET:-change-me}
+      ALLOW_ORIGIN: ${ALLOW_ORIGIN:-*}
+      LOG_CHANNEL: stderr
+      CACHE_STORE: redis
+      SESSION_DRIVER: array
+      QUEUE_CONNECTION: sync
+      REDIS_HOST: redis
+    depends_on: {mysql: {condition: service_healthy}}
+    healthcheck: &php_healthcheck
+      test: ["CMD", "php", "-r", "$$s = @fsockopen('127.0.0.1', 9000); exit($$s ? 0 : 1);"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+      start_period: 5s
+    networks: [fpxxl]
+
+  minigame_php:
+    build: {context: ./php, dockerfile: Dockerfile}
+    volumes:
+      - ../minigame-api:/var/www/minigame-api
+      - ./php/php.ini:/usr/local/etc/php/conf.d/custom.ini:ro
+      - ./php/www.conf:/usr/local/etc/php-fpm.d/www.conf:ro
+    working_dir: /var/www/minigame-api
+    environment:
+      <<: *api_env
+      APP_NAME: FPXXL Minigame API
+      APP_URL: http://minigame-api.fpxxl.local
+      APP_KEY: ${MINIGAME_APP_KEY:-base64:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=}
+      WECHAT_APP_ID: ${FPXXL_WECHAT_APP_ID:-${WECHAT_APP_ID:-}}
+      WECHAT_APP_SECRET: ${FPXXL_WECHAT_APP_SECRET:-${WECHAT_APP_SECRET:-}}
+    depends_on: {mysql: {condition: service_healthy}}
+    healthcheck: *php_healthcheck
+    networks: [fpxxl]
+
+  mysql:
+    image: mysql:8.0
+    ports: ["3306:3306"]
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ../../docker_config/deploy/mysql:/docker-entrypoint-initdb.d:ro
+      - ./mysql/my.cnf:/etc/mysql/conf.d/custom.cnf:ro
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootsecret}
+      MYSQL_DATABASE: ${FPXXL_DB_DATABASE:-fpxxl}
+      MYSQL_USER: ${FPXXL_DB_USERNAME:-fpxxl}
+      MYSQL_PASSWORD: ${FPXXL_DB_PASSWORD:-fpxxl}
+      TZ: Asia/Beijing
+    healthcheck: {test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-rootsecret}"], interval: 10s, timeout: 5s, retries: 10}
+    networks: [fpxxl]
+
+  redis:
+    image: redis:7.2-alpine
+    ports: ["6379:6379"]
+    volumes: ["redis_data:/data", "./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro"]
+    command: redis-server /usr/local/etc/redis/redis.conf
+    networks: [fpxxl]
+
+networks: {fpxxl: {driver: bridge}}
+volumes: {mysql_data: {}, redis_data: {}}
