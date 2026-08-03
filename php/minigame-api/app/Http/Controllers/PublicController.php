@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\ClientErrorLogger;
 use App\Services\PlayerRegistrationService;
 use App\Support\ApiData;
 use Illuminate\Http\JsonResponse;
@@ -42,22 +43,35 @@ class PublicController extends Controller
         'updated_at' => 'updatedAt',
     ];
 
-    public function login(Request $r, PlayerRegistrationService $players): JsonResponse
-    {
+    public function login(
+        Request $r,
+        PlayerRegistrationService $players,
+        ClientErrorLogger $errorLogger,
+    ): JsonResponse {
         $d = $r->validate([
             'code' => 'required|string',
             'nickname' => 'nullable|string',
             'avatarUrl' => 'nullable|string',
         ]);
-        $session = $this->code2Session(trim($d['code']));
-        $openId = $session['openid'];
-        $unionId = $session['unionid'] ?? null;
-
-        [$p, $g] = $players->upsert(
-            $openId,
-            $unionId,
-            $d['avatarUrl'] ?? '',
-        );
+        try {
+            $session = $this->code2Session(trim($d['code']));
+            $openId = $session['openid'];
+            $unionId = $session['unionid'] ?? null;
+            [$p, $g] = $players->upsert(
+                $openId,
+                $unionId,
+                $d['avatarUrl'] ?? '',
+            );
+        } catch (\Throwable $error) {
+            $errorLogger->write('backend_auth_login', [
+                'source' => 'backend',
+                'exception' => $error::class,
+                'message' => mb_substr($error->getMessage(), 0, 500),
+                'ip' => $r->ip(),
+                'user_agent' => mb_substr((string) $r->userAgent(), 0, 255),
+            ]);
+            throw $error;
+        }
 
         return response()->json([
             'token' => $openId,

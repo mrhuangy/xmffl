@@ -182,9 +182,11 @@ class GameApp {
       })
       .catch((error) => {
         this.sessionReady = false;
+        this.sessionPromise = null;
         if (typeof console !== "undefined" && console.warn) {
           console.warn("sync session failed", error);
         }
+        return null;
       });
     return this.sessionPromise;
   }
@@ -1175,7 +1177,13 @@ class GameApp {
     this.showToast("\u6b63\u5728\u8fdb\u5165\u5173\u5361");
     const auth = this.progressStore.loadAuth();
     const session = auth && auth.token ? Promise.resolve() : (this.sessionPromise || this.syncSession());
-    Promise.all([session, this.ensureLevelConfigs()])
+    const authenticatedSession = session.then(() => {
+      const currentAuth = this.progressStore.loadAuth();
+      if (!currentAuth || !currentAuth.token) {
+        throw new Error("missing auth token");
+      }
+    });
+    Promise.all([authenticatedSession, this.ensureLevelConfigs()])
       .then(() => this.loadImagesOnce(`game:${levelId}`, this.gameImageAssets(levelId)))
       .then(() => this.apiClient.startLevel(levelId))
       .then((progress) => {

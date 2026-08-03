@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\ClientErrorController;
 use App\Http\Controllers\GameController;
 use App\Http\Controllers\PublicController;
 use Illuminate\Support\Facades\Route;
@@ -7,6 +8,8 @@ use Illuminate\Support\Facades\Route;
 Route::get('/healthz', fn () => response()->json(['status' => 'ok']));
 Route::prefix('/api/v1')->group(function () {
     Route::post('/auth/login', [PublicController::class, 'login']);
+    Route::post('/client-errors', [ClientErrorController::class, 'store'])
+        ->middleware('throttle:30,1');
     Route::get('/config/init', [PublicController::class, 'init']);
     Route::get('/config/levels', [PublicController::class, 'levels']);
     Route::get('/config/ads', [PublicController::class, 'ads']);

@@ -9,7 +9,7 @@ class ApiClient {
     this.progressStore = progressStore;
   }
 
-  login() {
+  login(retried = false) {
     return wxLogin()
       .then((loginResult) => request({
         url: `${API_BASE}/auth/login`,
@@ -31,6 +31,14 @@ class ApiClient {
           this.progressStore.saveRemote(data.progress);
         }
         return data;
+      })
+      .catch((error) => {
+        if (!retried) {
+          return new Promise((resolve) => setTimeout(resolve, 800))
+            .then(() => this.login(true));
+        }
+        reportClientError("auth_login", error);
+        throw error;
       });
   }
 
@@ -228,9 +236,13 @@ function requestWithRetry(options, attempt) {
           return;
         }
         const message = res.data && res.data.error ? res.data.error : `HTTP ${res.statusCode}`;
-        reject(new Error(message));
+        const error = new Error(message);
+        error.statusCode = res.statusCode;
+        error.requestUrl = options.url;
+        reject(error);
       },
       fail: (error) => {
+        error.requestUrl = options.url;
         if (shouldRetry(error) && attempt < REQUEST_RETRY_COUNT) {
           setTimeout(() => {
             requestWithRetry(options, attempt + 1).then(resolve).catch(reject);
@@ -240,6 +252,40 @@ function requestWithRetry(options, attempt) {
         reject(error);
       }
     });
+  });
+}
+
+function reportClientError(stage, error) {
+  let systemInfo = {};
+  try {
+    systemInfo = wx.getSystemInfoSync ? wx.getSystemInfoSync() : {};
+  } catch (ignored) {
+    systemInfo = {};
+  }
+  const device = {
+    platform: systemInfo.platform || "",
+    model: systemInfo.model || "",
+    system: systemInfo.system || "",
+    version: systemInfo.version || "",
+    SDKVersion: systemInfo.SDKVersion || "",
+    brand: systemInfo.brand || "",
+    language: systemInfo.language || ""
+  };
+  wx.request({
+    url: `${API_BASE}/client-errors`,
+    method: "POST",
+    timeout: 5000,
+    header: { "Content-Type": "application/json" },
+    data: {
+      stage,
+      message: String((error && error.message) || "unknown client error").slice(0, 500),
+      errMsg: String((error && error.errMsg) || "").slice(0, 500),
+      statusCode: Number((error && error.statusCode) || 0),
+      requestUrl: String((error && error.requestUrl) || `${API_BASE}/auth/login`).slice(0, 255),
+      occurredAt: Date.now(),
+      device
+    },
+    fail: () => {}
   });
 }
 
